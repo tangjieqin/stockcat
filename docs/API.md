@@ -174,7 +174,7 @@ P1 计划：`PREMIUM_ABOVE`/`PREMIUM_BELOW`（溢价率）、`INDICATOR_CROSS`�
 
 ### `PATCH /alert-rules/{id}`
 
-允许更新 `name`、`params`、`cooldownMinutes`、`enabled`。不允许用 PATCH 悄悄更换标的或 `ruleType`；需要换类型时应删除重建，历史事件快照不受影响。
+允许更新 `name`、`ruleType`、`params`、`cooldownMinutes`、`enabled`。`ruleType` 可改：以目标类型校验参数（未传 `params` 时用现有参数校验，不兼容返回 `400`）。**标的不允许**用 PATCH 更换，需要换标的时应删除重建，历史事件快照不受影响。
 
 ### `DELETE /alert-rules/{id}`
 

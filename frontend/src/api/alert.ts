@@ -71,10 +71,10 @@ export async function updateAlertRuleEnabled(id: number, enabled: boolean): Prom
   return resp.data
 }
 
-/** 修改规则（名称/参数/冷却时间；标的与类型不可改，需删除重建） */
+/** 修改规则（名称/类型/参数/冷却时间；标的不变更，需删除重建） */
 export async function updateAlertRule(
   id: number,
-  req: { name: string; params: Record<string, number>; cooldownMinutes: number },
+  req: { name: string; ruleType?: string; params: Record<string, number>; cooldownMinutes: number },
 ): Promise<AlertRule> {
   const resp = await http.patch<AlertRule>(`/alert-rules/${id}`, req)
   return resp.data

@@ -78,7 +78,7 @@ async function toggle(r: AlertRule) {
 
 // ---- 修改规则（名称/阈值/冷却可改；标的与类型不可改） ----
 const editing = ref<AlertRule | null>(null)
-const editForm = ref({ name: '', threshold: 0, cooldownMinutes: 30 })
+const editForm = ref({ name: '', ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 })
 const editError = ref('')
 const editSubmitting = ref(false)
 
@@ -87,6 +87,7 @@ function openEdit(r: AlertRule) {
   editError.value = ''
   editForm.value = {
     name: r.name,
+    ruleType: r.ruleType,
     threshold: Number(r.params.threshold ?? 0),
     cooldownMinutes: r.cooldownMinutes,
   }
@@ -100,6 +101,7 @@ async function submitEdit() {
   try {
     const updated = await updateAlertRule(editing.value.id, {
       name: editForm.value.name.trim(),
+      ruleType: editForm.value.ruleType,
       params: { threshold: Number(editForm.value.threshold) },
       cooldownMinutes: Number(editForm.value.cooldownMinutes) || 0,
     })
@@ -233,7 +235,11 @@ onMounted(load)
         </div>
         <div class="form-row">
           <label>类型</label>
-          <input :value="formatParams(editing.ruleType, editing.params).split(' ')[0] + '（不可改）'" disabled />
+          <select v-model="editForm.ruleType">
+            <option v-for="t in RULE_TYPES" :key="t.value" :value="t.value" :disabled="t.phase !== 'P0'">
+              {{ t.label }}（{{ t.phase }}）{{ t.phase !== 'P0' ? ' - 暂不可用' : '' }}
+            </option>
+          </select>
         </div>
         <div class="form-row">
           <label>名称</label>
@@ -248,7 +254,7 @@ onMounted(load)
           <input v-model.number="editForm.cooldownMinutes" type="number" min="0" />
           <span class="unit">分钟</span>
         </div>
-        <p class="hint">如需更换标的或条件类型，请删除后重建（历史事件快照不受影响）。</p>
+        <p class="hint">类型可改（参数按新类型校验）；如需更换标的请删除后重建（历史事件快照不受影响）。</p>
         <div v-if="editError" class="banner error">{{ editError }}</div>
         <div class="modal-foot">
           <button class="btn" @click="editing = null">取消</button>

@@ -62,7 +62,8 @@ public class AlertRuleController {
     public AlertRuleResponse update(@PathVariable Long id, @Valid @RequestBody UpdateAlertRuleRequest req) {
         // params 为 null 表示本次不修改参数（PATCH 语义），不能序列化成 "{}" 触发参数校验
         String paramsJson = req.params() == null ? null : toJson(req.params());
-        return AlertRuleResponse.from(service.update(id, req.name(), paramsJson, req.cooldownMinutes(), req.enabled()));
+        return AlertRuleResponse.from(service.update(id, req.name(), req.ruleType(), paramsJson,
+                req.cooldownMinutes(), req.enabled()));
     }
 
     @DeleteMapping("/alert-rules/{id}")

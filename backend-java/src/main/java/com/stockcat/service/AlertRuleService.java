@@ -95,19 +95,21 @@ public class AlertRuleService {
     }
 
     /**
-     * PATCH：只允许 name/params/cooldownMinutes/enabled（不允许换标的或 ruleType）。
+     * PATCH：允许 name/ruleType/params/cooldownMinutes/enabled（标的不允许换，需删除重建）。
+     * ruleType 可改：以目标类型校验参数（未传 params 时用现有参数校验，不兼容则报错）。
      */
     @Transactional
-    public AlertRule update(Long id, String name, String paramsJson, Integer cooldownMinutes, Boolean enabled) {
+    public AlertRule update(Long id, String name, String ruleType, String paramsJson,
+                            Integer cooldownMinutes, Boolean enabled) {
         AlertRule existing = ruleMapper.findById(id);
         if (existing == null) {
             throw ApiException.notFound("规则不存在: id=" + id);
         }
-        if (paramsJson != null) {
-            RuleEvaluator evaluator = registry.get(existing.getRuleType());
-            evaluator.validateParams(parse(paramsJson));
-        }
-        ruleMapper.updateFields(id, name, paramsJson, cooldownMinutes, enabled);
+        String targetType = ruleType != null ? ruleType : existing.getRuleType();
+        RuleEvaluator evaluator = registry.get(targetType); // 未知类型在 registry.get 内报 VALIDATION_ERROR
+        String effectiveParams = paramsJson != null ? paramsJson : existing.getParamsJson();
+        evaluator.validateParams(parse(effectiveParams));
+        ruleMapper.updateFields(id, name, ruleType, paramsJson, cooldownMinutes, enabled);
         return ruleMapper.findById(id);
     }
 

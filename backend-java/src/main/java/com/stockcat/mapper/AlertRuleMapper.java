@@ -67,6 +67,7 @@ public interface AlertRuleMapper {
             <set>
                 updated_at = now()
                 <if test="name != null">, name = #{name}</if>
+                <if test="ruleType != null">, rule_type = #{ruleType}</if>
                 <if test="paramsJson != null">, params = CAST(#{paramsJson} AS jsonb)</if>
                 <if test="cooldownMinutes != null">, cooldown_minutes = #{cooldownMinutes}</if>
                 <if test="enabled != null">, enabled = #{enabled}</if>
@@ -74,7 +75,8 @@ public interface AlertRuleMapper {
             WHERE id = #{id}
             </script>
             """)
-    int updateFields(@Param("id") Long id, @Param("name") String name, @Param("paramsJson") String paramsJson,
+    int updateFields(@Param("id") Long id, @Param("name") String name, @Param("ruleType") String ruleType,
+                     @Param("paramsJson") String paramsJson,
                      @Param("cooldownMinutes") Integer cooldownMinutes, @Param("enabled") Boolean enabled);
 
     @Update("UPDATE alert_rule SET last_triggered_at = #{at}, updated_at = now() WHERE id = #{id}")
