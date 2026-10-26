@@ -39,14 +39,14 @@ export interface Page<T> {
   total: number
 }
 
-/** P0 支持的规则类型元数据（P1 类型禁用提示） */
+/** P0 支持的规则类型元数据（P1 类型禁用提示）。条件均为含边界的 ≥/≤ 判断 */
 export const RULE_TYPES = [
-  { value: 'PRICE_ABOVE', label: '价格高于', paramsHint: '阈值（元）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'PRICE_BELOW', label: '价格低于', paramsHint: '阈值（元）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'CHANGE_PERCENT_ABOVE', label: '涨跌幅高于', paramsHint: '阈值（%，如 +5）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'CHANGE_PERCENT_BELOW', label: '涨跌幅低于', paramsHint: '阈值（%，跌20%填 -20）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'PREMIUM_ABOVE', label: '溢价率高于', paramsHint: '阈值（%）', paramKey: 'threshold', phase: 'P1' },
-  { value: 'PREMIUM_BELOW', label: '溢价率低于', paramsHint: '阈值（%）', paramKey: 'threshold', phase: 'P1' },
+  { value: 'PRICE_ABOVE', label: '价格 ≥', paramsHint: '阈值（元）', paramKey: 'threshold', phase: 'P0' },
+  { value: 'PRICE_BELOW', label: '价格 ≤', paramsHint: '阈值（元）', paramKey: 'threshold', phase: 'P0' },
+  { value: 'CHANGE_PERCENT_ABOVE', label: '涨跌幅 ≥', paramsHint: '阈值（%，如 +5）', paramKey: 'threshold', phase: 'P0' },
+  { value: 'CHANGE_PERCENT_BELOW', label: '涨跌幅 ≤', paramsHint: '阈值（%，跌20%填 -20）', paramKey: 'threshold', phase: 'P0' },
+  { value: 'PREMIUM_ABOVE', label: '溢价率 ≥', paramsHint: '阈值（%）', paramKey: 'threshold', phase: 'P1' },
+  { value: 'PREMIUM_BELOW', label: '溢价率 ≤', paramsHint: '阈值（%）', paramKey: 'threshold', phase: 'P1' },
   { value: 'INDICATOR_CROSS', label: '指标交叉', paramsHint: '指标参数', paramKey: 'indicator', phase: 'P1' },
 ] as const
 
@@ -68,6 +68,15 @@ export async function createAlertRule(req: {
 
 export async function updateAlertRuleEnabled(id: number, enabled: boolean): Promise<AlertRule> {
   const resp = await http.patch<AlertRule>(`/alert-rules/${id}`, { enabled })
+  return resp.data
+}
+
+/** 修改规则（名称/参数/冷却时间；标的与类型不可改，需删除重建） */
+export async function updateAlertRule(
+  id: number,
+  req: { name: string; params: Record<string, number>; cooldownMinutes: number },
+): Promise<AlertRule> {
+  const resp = await http.patch<AlertRule>(`/alert-rules/${id}`, req)
   return resp.data
 }
 

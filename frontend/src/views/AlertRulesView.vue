@@ -10,6 +10,7 @@ import {
   formatParams,
   listAlertRules,
   RULE_TYPES,
+  updateAlertRule,
   updateAlertRuleEnabled,
   type AlertRule,
 } from '../api/alert'
@@ -75,6 +76,43 @@ async function toggle(r: AlertRule) {
   }
 }
 
+// ---- 修改规则（名称/阈值/冷却可改；标的与类型不可改） ----
+const editing = ref<AlertRule | null>(null)
+const editForm = ref({ name: '', threshold: 0, cooldownMinutes: 30 })
+const editError = ref('')
+const editSubmitting = ref(false)
+
+function openEdit(r: AlertRule) {
+  editing.value = r
+  editError.value = ''
+  editForm.value = {
+    name: r.name,
+    threshold: Number(r.params.threshold ?? 0),
+    cooldownMinutes: r.cooldownMinutes,
+  }
+}
+
+async function submitEdit() {
+  if (!editing.value) return
+  editError.value = ''
+  if (!editForm.value.name.trim()) return (editError.value = '请输入规则名称')
+  editSubmitting.value = true
+  try {
+    const updated = await updateAlertRule(editing.value.id, {
+      name: editForm.value.name.trim(),
+      params: { threshold: Number(editForm.value.threshold) },
+      cooldownMinutes: Number(editForm.value.cooldownMinutes) || 0,
+    })
+    const idx = rules.value.findIndex((x) => x.id === updated.id)
+    if (idx >= 0) rules.value[idx] = updated
+    editing.value = null
+  } catch (e) {
+    editError.value = e instanceof ApiError ? e.message : '修改失败，请重试'
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
 async function remove(r: AlertRule) {
   if (!confirm(`确定删除规则「${r.name}」吗？\n（历史告警事件将保留，且仍可解释）`)) return
   try {
@@ -113,7 +151,7 @@ onMounted(load)
           <th>冷却</th>
           <th>最近触发</th>
           <th>状态</th>
-          <th style="width: 140px">操作</th>
+          <th style="width: 190px">操作</th>
         </tr>
       </thead>
       <tbody>
@@ -127,6 +165,7 @@ onMounted(load)
             <span class="badge" :class="r.enabled ? 'ok' : 'off'">{{ r.enabled ? '启用' : '停用' }}</span>
           </td>
           <td>
+            <button class="btn small" @click="openEdit(r)">修改</button>
             <button class="btn small" @click="toggle(r)">{{ r.enabled ? '停用' : '启用' }}</button>
             <button class="btn small danger" @click="remove(r)">删除</button>
           </td>
@@ -173,12 +212,47 @@ onMounted(load)
           <input v-model.number="form.cooldownMinutes" type="number" min="0" />
           <span class="unit">分钟</span>
         </div>
-        <p class="hint">条件判断含边界（如「高于 10」在价格恰好为 10 时也触发）；同一轮触发后进入冷却期。</p>
+        <p class="hint">条件含边界（如「价格 ≥ 10」在价格恰好为 10 时也触发）；同一轮触发后进入冷却期。</p>
         <div v-if="addError" class="banner error">{{ addError }}</div>
         <div class="modal-foot">
           <button class="btn" @click="showAdd = false">取消</button>
           <button class="btn primary" :disabled="submitting" @click="submitAdd">
             {{ submitting ? '提交中…' : '创建' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- 修改弹窗（标的与类型不可改） -->
+    <div v-if="editing" class="modal-mask" @click.self="editing = null">
+      <div class="modal">
+        <h2>修改规则</h2>
+        <div class="form-row">
+          <label>标的</label>
+          <input :value="`${editing.symbol} ${editing.instrumentName}`" disabled />
+        </div>
+        <div class="form-row">
+          <label>类型</label>
+          <input :value="formatParams(editing.ruleType, editing.params).split(' ')[0] + '（不可改）'" disabled />
+        </div>
+        <div class="form-row">
+          <label>名称</label>
+          <input v-model="editForm.name" />
+        </div>
+        <div class="form-row">
+          <label>阈值</label>
+          <input v-model.number="editForm.threshold" type="number" step="0.01" />
+        </div>
+        <div class="form-row">
+          <label>冷却</label>
+          <input v-model.number="editForm.cooldownMinutes" type="number" min="0" />
+          <span class="unit">分钟</span>
+        </div>
+        <p class="hint">如需更换标的或条件类型，请删除后重建（历史事件快照不受影响）。</p>
+        <div v-if="editError" class="banner error">{{ editError }}</div>
+        <div class="modal-foot">
+          <button class="btn" @click="editing = null">取消</button>
+          <button class="btn primary" :disabled="editSubmitting" @click="submitEdit">
+            {{ editSubmitting ? '保存中…' : '保存' }}
           </button>
         </div>
       </div>

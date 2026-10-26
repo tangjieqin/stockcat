@@ -163,7 +163,7 @@ P0 支持的 `ruleType` 与 `params`：
 
 | ruleType | params | 说明 |
 |---|---|---|
-| `PRICE_ABOVE` / `PRICE_BELOW` | `{"threshold": 10.5}` | 最新价高于/低于阈值（含边界） |
+| `PRICE_ABOVE` / `PRICE_BELOW` | `{"threshold": 10.5}` | 最新价 ≥/≤ 阈值（含边界） |
 | `CHANGE_PERCENT_ABOVE` / `CHANGE_PERCENT_BELOW` | `{"threshold": -20}` | 涨跌幅阈值，百分数值，跌 20% 填 -20 |
 
 P1 计划：`PREMIUM_ABOVE`/`PREMIUM_BELOW`（溢价率）、`INDICATOR_CROSS`（指标交叉，params 含指标与周期参数）。

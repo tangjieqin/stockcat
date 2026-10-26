@@ -11,7 +11,7 @@ public interface AlertEventMapper {
 
     /**
      * 去重键唯一约束 + ON CONFLICT DO NOTHING：并发/重复评估安全。
-     * 返回 1 表示新事件写入，0 表示重复被抑制。
+     * 返回 1 表示新事件写入（并回填生成的主键 id），0 表示重复被抑制。
      */
     @Insert("""
             INSERT INTO alert_event (rule_id, instrument_id, rule_name_snapshot, rule_type_snapshot,
@@ -22,6 +22,7 @@ public interface AlertEventMapper {
                     #{observedDetail}::jsonb, #{quoteMarketTime}, #{triggeredAt}, #{deduplicationKey}, now())
             ON CONFLICT (deduplication_key) DO NOTHING
             """)
+    @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(AlertEvent event);
 
     @Select("""
