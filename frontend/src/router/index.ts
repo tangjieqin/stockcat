@@ -11,7 +11,7 @@ const router = createRouter({
       path: '/',
       component: () => import('../layouts/MainLayout.vue'),
       children: [
-        { path: '', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '首页·总览' } },
+        { path: '', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '首页' } },
 
         // 告警
         { path: 'alerts', name: 'alert-overview', component: () => import('../views/AlertOverviewView.vue'), meta: { title: '告警总览' } },

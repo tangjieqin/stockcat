@@ -12,12 +12,12 @@ interface NavItem {
 const navGroups: Array<{ label: string; items: NavItem[] }> = [
   {
     label: '首页',
-    items: [{ label: '总览', to: '/', exact: true }],
+    items: [{ label: '首页', to: '/', exact: true }],
   },
   {
     label: '告警',
     items: [
-      { label: '总览', to: '/alerts' },
+      { label: '告警总览', to: '/alerts' },
       { label: '监控', to: '/alerts/targets' },
       { label: '规则', to: '/alerts/rules' },
       { label: '历史', to: '/alerts/history' },

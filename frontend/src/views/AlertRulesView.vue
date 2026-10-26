@@ -153,7 +153,7 @@ onMounted(load)
           <th>规则</th>
           <th>标的</th>
           <th>条件</th>
-          <th>冷却</th>
+          <th>冷却时间</th>
           <th>最近触发</th>
           <th>状态</th>
           <th style="width: 190px">操作</th>
@@ -210,11 +210,11 @@ onMounted(load)
                  :placeholder="RULE_TYPES.find((t) => t.value === form.ruleType)?.paramsHint" />
         </div>
         <div class="form-row">
-          <label>冷却</label>
+          <label>冷却时间</label>
           <input v-model.number="form.cooldownMinutes" type="number" min="0" />
           <span class="unit">分钟</span>
         </div>
-        <p class="hint">条件含边界（如「价格 ≥ 10」在价格恰好为 10 时也触发）；同一轮触发后进入冷却期。</p>
+        <p class="hint">触发一次后，在冷却时间内即使条件持续满足也不再重复推送，防止同一提醒刷屏。填 0 表示每次满足都推送（慎用）。</p>
         <div v-if="addError" class="banner error">{{ addError }}</div>
         <div class="modal-foot">
           <button class="btn" @click="showAdd = false">取消</button>
@@ -249,7 +249,7 @@ onMounted(load)
           <input v-model.number="editForm.threshold" type="number" step="0.01" />
         </div>
         <div class="form-row">
-          <label>冷却</label>
+          <label>冷却时间</label>
           <input v-model.number="editForm.cooldownMinutes" type="number" min="0" />
           <span class="unit">分钟</span>
         </div>

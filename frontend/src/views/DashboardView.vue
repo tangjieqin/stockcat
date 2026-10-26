@@ -50,7 +50,7 @@ function fmtTime(iso: string | null): string {
 
 <template>
   <div>
-    <h1>首页 · 总览</h1>
+    <h1>首页</h1>
 
     <div v-if="error" class="banner error">无法加载总览：{{ error }}</div>
 
