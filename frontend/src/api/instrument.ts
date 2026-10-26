@@ -32,6 +32,12 @@ export async function listInstruments(params: { keyword?: string; page?: number;
   return resp.data
 }
 
+/** 单个标的主数据；不存在时抛 ApiError(code=NOT_FOUND)。 */
+export async function getInstrument(id: number): Promise<Instrument> {
+  const resp = await http.get<Instrument>(`/instruments/${id}`)
+  return resp.data
+}
+
 export async function listMonitorTargets(): Promise<MonitorTarget[]> {
   const resp = await http.get<MonitorTarget[]>('/monitor-targets')
   return resp.data

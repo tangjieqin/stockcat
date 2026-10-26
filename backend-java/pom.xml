@@ -54,6 +54,9 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- 技术指标为自研实现（见 indicator 包注释）：ta4j 的 RSI/KDJ/MACD 口径与通达信不一致，
+             且 0.22+ 需要 Java 25，本机是 21。不引第三方指标库，也不留版本隐患。 -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

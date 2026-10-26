@@ -26,7 +26,7 @@ flowchart LR
 - 前端：Vue 3、TypeScript、Vite、Pinia。
 - Java 服务：Java 21、Spring Boot 3、Spring Web、Validation、MyBatis（已定：数据访问统一使用 MyBatis，不用 JPA/JDBC 混用）。
 - 数据库：PostgreSQL。
-- 技术指标：P1 使用 Java ta4j。
+- 技术指标：P1 由 Java 自研计算（MACD/RSI/KDJ）。原计划用 ta4j，实测其 RSI 平滑系数、KDJ 递推与通达信不一致（RSI6 差 13 点），为保证与看盘软件同值改为自研，理由见 `PLAN_P1.md` P1.3。
 - Python：Python 3.12+（具体小版本按依赖兼容性验证后锁定）、FastAPI、Pydantic；P2 使用 LangChain。
 - 测试：Java JUnit 5；Python pytest；前端按实际采用的测试工具补齐。
 - 部署：本地开发可用 Docker Compose 启动 PostgreSQL；应用进程可本机运行。Docker 不是业务逻辑依赖。
@@ -129,9 +129,11 @@ P0 不要求所有服务容器化：前端、Java、Python 均直接在本机启
 2. Java 是业务数据权威写入者。
 3. Python 数据适配器只提供标准化数据；Java 验证并持久化。
 4. AI Agent 只通过受控 Java API 读取业务数据。
-5. ta4j 是 P1 指标计算的唯一实现。
+5. 指标只在 Java 侧实现（当前为自研，未引 ta4j），Python 不重复实现。
 6. P0 不引入 Redis、Kafka、pgvector。
 7. 实时行情、历史 K 线、IOPV、净值是不同数据类型，分别验证和建模。
 8. 持仓由交易流水确定性计算，是纯 Java 本地逻辑，不依赖行情源也能算出数量与成本；行情只影响市值与浮动盈亏的展示。
 9. 交易流水和用户日记只能由用户操作产生；AI（P2）只能生成复盘草稿等待确认，不得修改交易记录、覆盖日记、修改规则或触发通知。
 10. 告警规则类型可插拔：`alert_rule.rule_type`（开放枚举）+ `params JSONB`，Java 侧用评估器注册表（每个 rule_type 一个 `RuleEvaluator` 实现，启动时注册）调度评估；新增规则类型 = 新增一个 evaluator + 参数 schema，不改表结构和评估引擎。创建规则时校验该类型所需数据已接入，避免永不触发的"死规则"。
+   **评估输入统一为 `EvaluationContext`**（行情快照 + 已收盘日 K + 指标序列），evaluator 用 `requiresHistory()` 声明需要哪一类输入：
+   行情类规则盘中评估，指标类规则收盘后评估——两类规则的"有效期"不同，混在一个时间点评估会推出错误信号。

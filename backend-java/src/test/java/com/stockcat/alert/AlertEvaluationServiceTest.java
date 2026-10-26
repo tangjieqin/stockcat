@@ -48,7 +48,8 @@ class AlertEvaluationServiceTest {
         RuleEvaluatorRegistry registry() {
             return new RuleEvaluatorRegistry(java.util.List.of(
                     new PriceAboveEvaluator(), new PriceBelowEvaluator(),
-                    new ChangePercentAboveEvaluator(), new ChangePercentBelowEvaluator()));
+                    new ChangePercentAboveEvaluator(), new ChangePercentBelowEvaluator(),
+                    new MacdGoldenCrossEvaluator(), new PremiumAboveEvaluator()));
         }
     }
 
@@ -145,6 +146,74 @@ class AlertEvaluationServiceTest {
     void zeroCooldownAllowsImmediateRetrigger() {
         assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":12.5}", 0, NOW.minusSeconds(5)),
                 quote(12.6, 1.0, "VALID"), NOW)).isPresent();
+    }
+
+    // ---- 指标类规则（P1.6） ----
+
+    @Test
+    void indicatorRuleIsSkippedWhenOnlyQuoteIsAvailable() {
+        // 盘中任务只喂行情快照：指标规则必须安静跳过，不能拿半根 K 线去判金叉
+        AlertRule r = rule("MACD_GOLDEN_CROSS", "{}", 0, null);
+
+        assertThat(service.evaluate(r, quote(1300.0, 1.0, "VALID"), NOW)).isEmpty();
+        Mockito.verify(eventMapper, Mockito.never()).insert(any());
+    }
+
+    @Test
+    void indicatorRuleFiresOnHistoryContextWithTradingDayDedupKey() {
+        AlertRule r = rule("MACD_GOLDEN_CROSS", "{}", 0, null);
+        var bars = java.util.List.of(kline("2026-10-23"), kline("2026-10-26"));
+        var indicators = java.util.List.of(
+                new com.stockcat.indicator.IndicatorCalculator.IndicatorValues(-3.0, -2.0, -2.0,
+                        null, null, null, null, null, null),
+                new com.stockcat.indicator.IndicatorCalculator.IndicatorValues(1.0, 0.5, 1.0,
+                        null, null, null, null, null, null));
+        var context = EvaluationContext.ofHistory(bars, indicators);
+
+        Optional<AlertEvent> event = service.evaluateContext(r, context, NOW);
+
+        assertThat(event).isPresent();
+        // 同一天重复跑不会重复推送：键里带交易日，不带分钟
+        assertThat(event.get().getDeduplicationKey()).isEqualTo("rule-1-2026-10-26");
+        assertThat(event.get().getObservedPrice()).isEqualTo(101.0);
+        assertThat(event.get().getObservedDetail()).contains("\"dif\":1.0");
+    }
+
+    // ---- 溢价类规则（P1.5） ----
+
+    @Test
+    void premiumRuleFiresWithBasisInDetail() {
+        AlertRule r = rule("PREMIUM_ABOVE", "{\"threshold\":2}", 0, null);
+        com.stockcat.web.dto.FundPremiumResponse premium = new com.stockcat.web.dto.FundPremiumResponse(
+                java.time.LocalDate.parse("2026-10-26"), 4.18, 4.0735,
+                NOW.minusMinutes(2), 4.1797, java.time.LocalDate.parse("2026-10-23"), 3L,
+                2.61, "IOPV", NOW.minusMinutes(2).toString(), "tencent-qt", "eastmoney-f10-lsjz", NOW);
+
+        Optional<AlertEvent> event = service.evaluate(r, quote(4.18, 0.5, "VALID"), premium, NOW);
+
+        assertThat(event).isPresent();
+        // 溢价事件沿用分钟级去重（盘中可能反复穿越阈值），但明细里必须留下"拿什么算的"
+        assertThat(event.get().getDeduplicationKey()).startsWith("rule-1-");
+        assertThat(event.get().getObservedDetail()).contains("\"premiumBasis\":\"IOPV\"");
+        assertThat(event.get().getObservedDetail()).contains("\"premiumRate\":2.61");
+        assertThat(event.get().getObservedPrice()).isEqualTo(4.18);
+    }
+
+    @Test
+    void premiumRuleWithoutPremiumDataIsSkipped() {
+        AlertRule r = rule("PREMIUM_ABOVE", "{\"threshold\":2}", 0, null);
+
+        // 没传溢价视图（老入口 / 股票 / 取数失败）：安静跳过，不拿价格当基准
+        assertThat(service.evaluate(r, quote(4.18, 0.5, "VALID"), NOW)).isEmpty();
+        assertThat(service.evaluate(r, quote(4.18, 0.5, "VALID"), null, NOW)).isEmpty();
+        Mockito.verify(eventMapper, Mockito.never()).insert(any());
+    }
+
+    private static com.stockcat.domain.KlineDaily kline(String date) {
+        var bar = new com.stockcat.domain.KlineDaily();
+        bar.setTradeDate(java.time.LocalDate.parse(date));
+        bar.setClose("2026-10-23".equals(date) ? 100.0 : 101.0);
+        return bar;
     }
 
     // ---- 参数校验 ----

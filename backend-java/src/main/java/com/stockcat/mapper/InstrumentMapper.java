@@ -21,6 +21,15 @@ public interface InstrumentMapper {
     @Select("SELECT * FROM instrument WHERE id = #{id}")
     Instrument findById(@Param("id") Long id);
 
+    /** 批量取主数据（基金参考数据按 id 批量查询时用，避免 N 次单查）。 */
+    @Select("""
+            <script>
+            SELECT * FROM instrument WHERE id IN
+            <foreach collection="ids" item="iid" open="(" separator="," close=")">#{iid}</foreach>
+            </script>
+            """)
+    List<Instrument> selectByIds(@Param("ids") List<Long> ids);
+
     @Select("""
             <script>
             SELECT * FROM instrument

@@ -40,16 +40,150 @@ export interface Page<T> {
   total: number
 }
 
-/** P0 支持的规则类型元数据（P1 类型禁用提示）。条件均为含边界的 ≥/≤ 判断 */
-export const RULE_TYPES = [
-  { value: 'PRICE_ABOVE', label: '价格 ≥', paramsHint: '阈值（元）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'PRICE_BELOW', label: '价格 ≤', paramsHint: '阈值（元）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'CHANGE_PERCENT_ABOVE', label: '涨跌幅 ≥', paramsHint: '阈值（%，如 +5）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'CHANGE_PERCENT_BELOW', label: '涨跌幅 ≤', paramsHint: '阈值（%，跌20%填 -20）', paramKey: 'threshold', phase: 'P0' },
-  { value: 'PREMIUM_ABOVE', label: '溢价率 ≥', paramsHint: '阈值（%）', paramKey: 'threshold', phase: 'P1' },
-  { value: 'PREMIUM_BELOW', label: '溢价率 ≤', paramsHint: '阈值（%）', paramKey: 'threshold', phase: 'P1' },
-  { value: 'INDICATOR_CROSS', label: '指标交叉', paramsHint: '指标参数', paramKey: 'indicator', phase: 'P1' },
-] as const
+/** 规则参数定义：empty fields = 该规则不需要参数（如金叉/死叉） */
+export interface ParamField {
+  key: 'threshold' | 'period'
+  label: string
+  default: number
+  /** 有 options 时渲染成下拉（如 RSI 周期只能是 6/12/24） */
+  options?: number[]
+}
+
+export interface RuleTypeMeta {
+  value: string
+  label: string
+  phase: 'P0' | 'P1'
+  /** false 时下拉里禁用（功能还没实现） */
+  available: boolean
+  /** intraday = 盘中每 30 秒评估；close = 收盘后评估（避免拿半根 K 线判金叉） */
+  timing: 'intraday' | 'close'
+  fields: ParamField[]
+  /** 表单下方的口径说明：写清楚"什么时候触发"，避免用户以为收盘就一定会推 */
+  note?: string
+}
+
+const THRESHOLD_PRICE: ParamField = { key: 'threshold', label: '阈值（元）', default: 0 }
+const THRESHOLD_PERCENT: ParamField = { key: 'threshold', label: '阈值（%，跌 20 填 -20）', default: 0 }
+/** 溢价率是百分数：2.5 表示溢价 2.5%，-1.5 表示折价 1.5% */
+const THRESHOLD_PREMIUM: ParamField = { key: 'threshold', label: '溢价率阈值（%，折价填负数）', default: 2 }
+const RSI_FIELDS: ParamField[] = [
+  { key: 'period', label: 'RSI 周期', default: 6, options: [6, 12, 24] },
+  { key: 'threshold', label: '阈值（0~100）', default: 80 },
+]
+
+/** 规则类型元数据。指标类规则只在收盘后（15:40）评估，逻辑见后端 IndicatorAlertJob */
+export const RULE_TYPES: RuleTypeMeta[] = [
+  { value: 'PRICE_ABOVE', label: '价格 ≥', phase: 'P0', available: true, timing: 'intraday', fields: [THRESHOLD_PRICE] },
+  { value: 'PRICE_BELOW', label: '价格 ≤', phase: 'P0', available: true, timing: 'intraday', fields: [THRESHOLD_PRICE] },
+  { value: 'CHANGE_PERCENT_ABOVE', label: '涨跌幅 ≥', phase: 'P0', available: true, timing: 'intraday', fields: [THRESHOLD_PERCENT] },
+  { value: 'CHANGE_PERCENT_BELOW', label: '涨跌幅 ≤', phase: 'P0', available: true, timing: 'intraday', fields: [THRESHOLD_PERCENT] },
+  {
+    value: 'MACD_GOLDEN_CROSS',
+    label: 'MACD 金叉（DIF 上穿 DEA）',
+    phase: 'P1',
+    available: true,
+    timing: 'close',
+    fields: [],
+    note: '收盘后按日线判定，需要至少 35 根日 K（MACD 预热）；一天最多提醒一次。',
+  },
+  {
+    value: 'MACD_DEATH_CROSS',
+    label: 'MACD 死叉（DIF 下穿 DEA）',
+    phase: 'P1',
+    available: true,
+    timing: 'close',
+    fields: [],
+    note: '收盘后按日线判定，需要至少 35 根日 K；一天最多提醒一次。',
+  },
+  {
+    value: 'KDJ_GOLDEN_CROSS',
+    label: 'KDJ 金叉（K 上穿 D）',
+    phase: 'P1',
+    available: true,
+    timing: 'close',
+    fields: [],
+    note: '收盘后按日线判定，需要至少 10 根日 K；一天最多提醒一次。',
+  },
+  {
+    value: 'KDJ_DEATH_CROSS',
+    label: 'KDJ 死叉（K 下穿 D）',
+    phase: 'P1',
+    available: true,
+    timing: 'close',
+    fields: [],
+    note: '收盘后按日线判定，需要至少 10 根日 K；一天最多提醒一次。',
+  },
+  {
+    value: 'RSI_CROSS_ABOVE',
+    label: 'RSI 上穿阈值',
+    phase: 'P1',
+    available: true,
+    timing: 'close',
+    fields: RSI_FIELDS,
+    note: '只在"上穿那一下"提醒；已在上方不会补发，也不会每天重复推。',
+  },
+  {
+    value: 'RSI_CROSS_BELOW',
+    label: 'RSI 下穿阈值',
+    phase: 'P1',
+    available: true,
+    timing: 'close',
+    fields: RSI_FIELDS,
+    note: '只在"下穿那一下"提醒；已在下方不会补发。',
+  },
+  {
+    value: 'PREMIUM_ABOVE',
+    label: '溢价率 ≥',
+    phase: 'P1',
+    available: true,
+    timing: 'intraday',
+    fields: [THRESHOLD_PREMIUM],
+    note: '盘中每 30 秒判定。ETF 用实时 IOPV 作基准；LOF 只能用已公布净值，净值超过 3 天没更新时不再判定（可用参数 maxStaleDays 调整）。',
+  },
+  {
+    value: 'PREMIUM_BELOW',
+    label: '溢价率 ≤',
+    phase: 'P1',
+    available: true,
+    timing: 'intraday',
+    fields: [THRESHOLD_PREMIUM],
+    note: '折价填负数，如 -1.5 表示折价 1.5%。基准口径同上：ETF 用 IOPV，LOF 用最近一期净值。',
+  },
+  { value: 'INDICATOR_CROSS', label: '指标交叉', phase: 'P1', available: false, timing: 'close', fields: [] },
+]
+
+export function ruleTypeMeta(type: string): RuleTypeMeta | undefined {
+  return RULE_TYPES.find((t) => t.value === type)
+}
+
+/** 该类型需要渲染哪些输入框（交叉类为空） */
+export function paramFields(type: string): ParamField[] {
+  return ruleTypeMeta(type)?.fields ?? []
+}
+
+/**
+ * 表单值 → 提交给后端的 params。
+ * 只提交该类型真正需要的键：交叉类提交 {}，否则后端会按"类型选错了"拒绝。
+ */
+export function buildParams(type: string, values: Record<string, number | undefined>): Record<string, number> {
+  const params: Record<string, number> = {}
+  for (const field of paramFields(type)) {
+    const raw = values[field.key]
+    params[field.key] = Number(raw ?? field.default)
+  }
+  return params
+}
+
+/** 指标类规则的评估时机与行情类不同，表单里要说明清楚 */
+export function isIndicatorRule(type: string): boolean {
+  return ruleTypeMeta(type)?.timing === 'close'
+}
+
+/** 溢价类规则只对 ETF/LOF 有意义（后端创建时会再校验一次） */
+export function isPremiumRule(type: string): boolean {
+  return type === 'PREMIUM_ABOVE' || type === 'PREMIUM_BELOW'
+}
+
 
 export async function listAlertRules(params: { page?: number; size?: number }): Promise<Page<AlertRule>> {
   const resp = await http.get<Page<AlertRule>>('/alert-rules', { params })
@@ -113,24 +247,55 @@ export async function listAlertEvents(params: { page?: number; size?: number }):
 }
 
 export function ruleTypeLabel(type: string): string {
-  return RULE_TYPES.find((t) => t.value === type)?.label ?? type
+  return ruleTypeMeta(type)?.label ?? type
 }
 
-/** 规则名自动拼接：{标的名称} {条件}{阈值}，如「贵州茅台 价格≥1000」「中兴通讯 涨跌幅≥+5%」 */
-export function autoRuleName(instrumentName: string, ruleType: string, threshold: number): string {
-  const v = Number(threshold)
-  const isPercent = ruleType.startsWith('CHANGE_PERCENT') || ruleType.startsWith('PREMIUM')
-  const sign = ruleType.includes('BELOW') || v < 0 ? '' : v > 0 ? '+' : ''
-  return `${instrumentName} ${ruleTypeLabel(ruleType)}${isPercent ? `${sign}${v}%` : `¥${v}`}`
+function isPercentRule(type: string): boolean {
+  return type.startsWith('CHANGE_PERCENT') || type.startsWith('PREMIUM')
 }
 
-export function formatParams(type: string, params: Record<string, unknown>): string {
-  const def = RULE_TYPES.find((t) => t.value === type)
-  if (!def || params.threshold == null) return JSON.stringify(params)
-  const v = Number(params.threshold)
-  const sign = type.includes('BELOW') && v > 0 ? '' : v > 0 ? '+' : ''
-  if (type.startsWith('CHANGE_PERCENT') || type.startsWith('PREMIUM')) {
-    return `${def.label} ${sign}${v}%`
+function signedPercent(type: string, value: number): string {
+  const sign = type.includes('BELOW') || value < 0 ? '' : value > 0 ? '+' : ''
+  return `${sign}${value}%`
+}
+
+/** 规则名自动拼接：{标的名称} {条件}，如「贵州茅台 价格≥¥1000」「贵州茅台 MACD 金叉」 */
+export function autoRuleName(
+  instrumentName: string,
+  ruleType: string,
+  params: Record<string, number | undefined>,
+): string {
+  const type = ruleTypeMeta(ruleType)
+  const fields = type?.fields ?? []
+  if (fields.length === 0) {
+    return `${instrumentName} ${type?.label ?? ruleType}`
   }
-  return `${def.label} ¥${v}`
+  if (ruleType.startsWith('RSI_')) {
+    const period = Number(params.period ?? 6)
+    const threshold = Number(params.threshold ?? 0)
+    const direction = ruleType.includes('ABOVE') ? '上穿' : '下穿'
+    return `${instrumentName} RSI${period} ${direction} ${threshold}`
+  }
+  const value = Number(params.threshold ?? 0)
+  const suffix = isPercentRule(ruleType) ? signedPercent(ruleType, value) : `¥${value}`
+  return `${instrumentName} ${type?.label ?? ruleType}${suffix}`
 }
+
+/** 表格里展示的规则条件文案 */
+export function formatParams(type: string, params: Record<string, unknown>): string {
+  const meta = ruleTypeMeta(type)
+  if (!meta || meta.fields.length === 0) {
+    return meta?.label ?? JSON.stringify(params)
+  }
+  if (type.startsWith('RSI_')) {
+    const period = Number(params.period ?? 6)
+    const threshold = Number(params.threshold ?? 0)
+    return `${meta.label} ${threshold}（RSI${period}）`
+  }
+  if (params.threshold == null) {
+    return JSON.stringify(params)
+  }
+  const value = Number(params.threshold)
+  return isPercentRule(type) ? `${meta.label} ${signedPercent(type, value)}` : `${meta.label} ¥${value}`
+}
+

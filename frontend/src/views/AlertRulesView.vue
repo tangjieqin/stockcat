@@ -3,15 +3,19 @@
  * 告警规则页。对应 docs/UI.md「告警-规则」与 docs/API.md §4。
  * 同一标的可挂多条规则；P1 类型展示但禁用（与原型一致）。
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   autoRuleName,
+  buildParams,
   cooldownLabel,
   cooldownToSeconds,
   createAlertRule,
   deleteAlertRule,
   formatParams,
+  isPremiumRule,
   listAlertRules,
+  paramFields,
+  ruleTypeMeta,
   RULE_TYPES,
   splitCooldown,
   updateAlertRule,
@@ -28,7 +32,7 @@ const loading = ref(false)
 const errorMsg = ref('')
 
 const showAdd = ref(false)
-const form = ref({ instrumentId: 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownValue: 30, cooldownUnit: 'm' as CooldownUnit })
+const form = ref({ instrumentId: 0, ruleType: 'PRICE_ABOVE', threshold: 0, period: 6, cooldownValue: 30, cooldownUnit: 'm' as CooldownUnit })
 const addError = ref('')
 const submitting = ref(false)
 
@@ -57,15 +61,20 @@ async function submitAdd() {
     // 规则名自动拼接：{标的名称} {条件}{阈值}
     const target = targets.value.find((t) => t.instrument.id === form.value.instrumentId)
     const instrumentName = target?.instrument.name ?? target?.instrument.symbol ?? '规则'
+    // 交叉类规则没有参数，只能提交 {}；多传 threshold 会被后端当成"类型选错了"拒绝
+    const params = buildParams(form.value.ruleType, {
+      threshold: form.value.threshold,
+      period: form.value.period,
+    })
     await createAlertRule({
-      name: autoRuleName(instrumentName, form.value.ruleType, Number(form.value.threshold)),
+      name: autoRuleName(instrumentName, form.value.ruleType, params),
       instrumentId: form.value.instrumentId,
       ruleType: form.value.ruleType,
-      params: { threshold: Number(form.value.threshold) },
+      params,
       cooldownSeconds: cooldownToSeconds(Number(form.value.cooldownValue) || 0, form.value.cooldownUnit),
     })
     showAdd.value = false
-    form.value = { instrumentId: targets.value[0]?.instrument.id ?? 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownValue: 30, cooldownUnit: 'm' }
+    form.value = { instrumentId: targets.value[0]?.instrument.id ?? 0, ruleType: 'PRICE_ABOVE', threshold: 0, period: 6, cooldownValue: 30, cooldownUnit: 'm' }
     await load()
   } catch (e) {
     addError.value = e instanceof ApiError ? e.message : '创建失败，请重试'
@@ -85,7 +94,7 @@ async function toggle(r: AlertRule) {
 
 // ---- 修改规则（名称/阈值/冷却可改；标的与类型不可改） ----
 const editing = ref<AlertRule | null>(null)
-const editForm = ref({ name: '', ruleType: 'PRICE_ABOVE', threshold: 0, cooldownValue: 30, cooldownUnit: 'm' as CooldownUnit })
+const editForm = ref({ name: '', ruleType: 'PRICE_ABOVE', threshold: 0, period: 6, cooldownValue: 30, cooldownUnit: 'm' as CooldownUnit })
 const editError = ref('')
 const editSubmitting = ref(false)
 
@@ -97,6 +106,7 @@ function openEdit(r: AlertRule) {
     name: r.name,
     ruleType: r.ruleType,
     threshold: Number(r.params.threshold ?? 0),
+    period: Number(r.params.period ?? 6),
     cooldownValue: cd.value,
     cooldownUnit: cd.unit,
   }
@@ -111,7 +121,10 @@ async function submitEdit() {
     const updated = await updateAlertRule(editing.value.id, {
       name: editForm.value.name.trim(),
       ruleType: editForm.value.ruleType,
-      params: { threshold: Number(editForm.value.threshold) },
+      params: buildParams(editForm.value.ruleType, {
+        threshold: editForm.value.threshold,
+        period: editForm.value.period,
+      }),
       cooldownSeconds: cooldownToSeconds(Number(editForm.value.cooldownValue) || 0, editForm.value.cooldownUnit),
     })
     const idx = rules.value.findIndex((x) => x.id === updated.id)
@@ -134,6 +147,30 @@ async function remove(r: AlertRule) {
   }
 }
 
+/** 该规则类型是否需要这个输入框（交叉类两个都不要） */
+function hasField(type: string, key: 'threshold' | 'period'): boolean {
+  return paramFields(type).some((f) => f.key === key)
+}
+
+function noteOf(type: string): string | undefined {
+  return ruleTypeMeta(type)?.note
+}
+
+/**
+ * 溢价类规则只对 ETF/LOF 有意义。后端创建时也会拒绝，这里提前把选项置灰，
+ * 免得用户填完参数才看到"仅适用于 ETF/LOF"。
+ */
+const premiumApplicable = computed(() => {
+  const target = targets.value.find((t) => t.instrument.id === form.value.instrumentId)
+  return target?.instrument.type === 'ETF' || target?.instrument.type === 'LOF'
+})
+
+function typeDisabled(type: string): boolean {
+  const meta = ruleTypeMeta(type)
+  if (!meta || !meta.available) return true
+  return isPremiumRule(type) && !premiumApplicable.value
+}
+
 function fmtTime(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '—'
 }
@@ -146,7 +183,7 @@ onMounted(load)
     <div class="page-head">
       <div>
         <h1>告警规则</h1>
-        <p class="sub">一条规则针对一个标的；同一标的可挂多条规则，独立评估、独立冷却。P1 类型待数据接入后开放。</p>
+        <p class="sub">一条规则针对一个标的；同一标的可挂多条规则，独立评估、独立冷却。行情类规则盘中每 30 秒评估；指标类规则（MACD/KDJ/RSI）在收盘后 15:40 按日线评估，一天最多提醒一次。</p>
       </div>
       <button class="btn primary" @click="showAdd = true">＋ 新建规则</button>
     </div>
@@ -205,16 +242,28 @@ onMounted(load)
         <div class="form-row">
           <label>类型</label>
           <select v-model="form.ruleType">
-            <option v-for="t in RULE_TYPES" :key="t.value" :value="t.value" :disabled="t.phase !== 'P0'">
-              {{ t.label }}（{{ t.phase }}）{{ t.phase !== 'P0' ? ' - 暂不可用' : '' }}
+            <option v-for="t in RULE_TYPES" :key="t.value" :value="t.value" :disabled="typeDisabled(t.value)">
+              {{ t.label }}（{{ t.phase }}）{{ !t.available ? ' - 暂不可用' : isPremiumRule(t.value) && !premiumApplicable ? ' - 仅 ETF/LOF' : '' }}
             </option>
           </select>
         </div>
-        <div class="form-row">
+        <p v-if="!premiumApplicable" class="hint inline-hint">
+          溢价率规则只对 ETF/LOF 适用：股票没有 IOPV/单位净值可比。
+        </p>
+        <div v-if="hasField(form.ruleType, 'period')" class="form-row">
+          <label>RSI 周期</label>
+          <select v-model.number="form.period">
+            <option :value="6">6</option>
+            <option :value="12">12</option>
+            <option :value="24">24</option>
+          </select>
+        </div>
+        <div v-if="hasField(form.ruleType, 'threshold')" class="form-row">
           <label>阈值</label>
           <input v-model.number="form.threshold" type="number" step="0.01"
-                 :placeholder="RULE_TYPES.find((t) => t.value === form.ruleType)?.paramsHint" />
+                 :placeholder="paramFields(form.ruleType).find((f) => f.key === 'threshold')?.label" />
         </div>
+        <p v-if="noteOf(form.ruleType)" class="hint">{{ noteOf(form.ruleType) }}</p>
         <div class="form-row">
           <label>冷却时间</label>
           <input v-model.number="form.cooldownValue" type="number" min="0" />
@@ -245,8 +294,8 @@ onMounted(load)
         <div class="form-row">
           <label>类型</label>
           <select v-model="editForm.ruleType">
-            <option v-for="t in RULE_TYPES" :key="t.value" :value="t.value" :disabled="t.phase !== 'P0'">
-              {{ t.label }}（{{ t.phase }}）{{ t.phase !== 'P0' ? ' - 暂不可用' : '' }}
+            <option v-for="t in RULE_TYPES" :key="t.value" :value="t.value" :disabled="!t.available">
+              {{ t.label }}（{{ t.phase }}）{{ !t.available ? ' - 暂不可用' : '' }}
             </option>
           </select>
         </div>
@@ -254,10 +303,19 @@ onMounted(load)
           <label>名称</label>
           <input v-model="editForm.name" />
         </div>
-        <div class="form-row">
+        <div v-if="hasField(editForm.ruleType, 'period')" class="form-row">
+          <label>RSI 周期</label>
+          <select v-model.number="editForm.period">
+            <option :value="6">6</option>
+            <option :value="12">12</option>
+            <option :value="24">24</option>
+          </select>
+        </div>
+        <div v-if="hasField(editForm.ruleType, 'threshold')" class="form-row">
           <label>阈值</label>
           <input v-model.number="editForm.threshold" type="number" step="0.01" />
         </div>
+        <p v-if="noteOf(editForm.ruleType)" class="hint">{{ noteOf(editForm.ruleType) }}</p>
         <div class="form-row">
           <label>冷却时间</label>
           <input v-model.number="editForm.cooldownValue" type="number" min="0" />

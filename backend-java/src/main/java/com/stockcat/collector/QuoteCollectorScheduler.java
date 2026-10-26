@@ -5,6 +5,7 @@ import com.stockcat.mapper.InstrumentMapper;
 import com.stockcat.mapper.MonitorTargetMapper;
 import com.stockcat.mapper.WatchlistMapper;
 import com.stockcat.service.IndexService;
+import com.stockcat.service.FundReferenceService;
 import com.stockcat.service.QuoteService;
 import com.stockcat.service.TradingCalendarService;
 import com.stockcat.web.dto.RefreshSummary;
@@ -33,6 +34,7 @@ public class QuoteCollectorScheduler {
     private final TradingCalendarService calendarService;
     private final QuoteService quoteService;
     private final IndexService indexService;
+    private final FundReferenceService fundReferenceService;
     private final MonitorTargetMapper monitorTargetMapper;
     private final WatchlistMapper watchlistMapper;
     private final InstrumentMapper instrumentMapper;
@@ -44,6 +46,7 @@ public class QuoteCollectorScheduler {
     public QuoteCollectorScheduler(TradingCalendarService calendarService,
                                    QuoteService quoteService,
                                    IndexService indexService,
+                                   FundReferenceService fundReferenceService,
                                    MonitorTargetMapper monitorTargetMapper,
                                    WatchlistMapper watchlistMapper,
                                    InstrumentMapper instrumentMapper,
@@ -52,6 +55,7 @@ public class QuoteCollectorScheduler {
         this.calendarService = calendarService;
         this.quoteService = quoteService;
         this.indexService = indexService;
+        this.fundReferenceService = fundReferenceService;
         this.monitorTargetMapper = monitorTargetMapper;
         this.watchlistMapper = watchlistMapper;
         this.instrumentMapper = instrumentMapper;
@@ -96,8 +100,9 @@ public class QuoteCollectorScheduler {
         watchlistMapper.selectAll().forEach(row -> instrumentIds.add(row.getInstrumentId()));
 
         int failedQuotes = 0;
+        List<Instrument> instruments = List.of();
         if (!instrumentIds.isEmpty()) {
-            List<Instrument> instruments = instrumentIds.stream()
+            instruments = instrumentIds.stream()
                     .map(instrumentMapper::findById)
                     .filter(java.util.Objects::nonNull)
                     .toList();
@@ -106,7 +111,20 @@ public class QuoteCollectorScheduler {
             log.info("采集完成: 成功 {} 失败 {} / 共 {}", summary.succeeded(), summary.failed(), summary.requested());
         }
 
-        // 2. 内置指数（失败不影响个股）
+        // 2. 基金参考数据（IOPV/价格）：只对 ETF/LOF 发一次腾讯请求。
+        //    失败只记日志——溢价是附加信息，不能拖累行情采集与告警。
+        if (!instruments.isEmpty()) {
+            try {
+                FundReferenceService.MarketRefresh market = fundReferenceService.refreshMarket(instruments);
+                if (market.requested() > 0) {
+                    log.debug("基金参考数据: 更新 {} 失败 {} / 共 {}", market.updated(), market.failed(), market.requested());
+                }
+            } catch (Exception e) {
+                log.warn("基金参考数据刷新异常（不影响行情采集）: {}", e.getMessage());
+            }
+        }
+
+        // 3. 内置指数（失败不影响个股）
         indexService.refresh();
 
         stats.recordSuccess(instrumentIds.size(), failedQuotes);

@@ -31,6 +31,9 @@ public class AlertEvaluationJob {
     private final QuoteService quoteService;
     private final com.stockcat.mapper.AlertRuleMapper ruleMapper;
     private final AlertEvaluationService evaluationService;
+    private final RuleEvaluatorRegistry registry;
+    private final com.stockcat.service.FundReferenceService fundReferenceService;
+    private final com.stockcat.mapper.InstrumentMapper instrumentMapper;
     private final boolean evaluateEnabled;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -39,11 +42,17 @@ public class AlertEvaluationJob {
                               QuoteService quoteService,
                               com.stockcat.mapper.AlertRuleMapper ruleMapper,
                               AlertEvaluationService evaluationService,
+                              RuleEvaluatorRegistry registry,
+                              com.stockcat.service.FundReferenceService fundReferenceService,
+                              com.stockcat.mapper.InstrumentMapper instrumentMapper,
                               @org.springframework.beans.factory.annotation.Value("${stockcat.evaluate.enabled:true}") boolean evaluateEnabled) {
         this.calendarService = calendarService;
         this.quoteService = quoteService;
         this.ruleMapper = ruleMapper;
         this.evaluationService = evaluationService;
+        this.registry = registry;
+        this.fundReferenceService = fundReferenceService;
+        this.instrumentMapper = instrumentMapper;
         this.evaluateEnabled = evaluateEnabled;
     }
 
@@ -76,12 +85,14 @@ public class AlertEvaluationJob {
         LinkedHashSet<Long> instrumentIds = new LinkedHashSet<>();
         rules.forEach(r -> instrumentIds.add(r.getInstrumentId()));
         Map<Long, com.stockcat.web.dto.QuoteResponse> latest = quoteService.latest(new ArrayList<>(instrumentIds));
+        Map<Long, com.stockcat.web.dto.FundPremiumResponse> premiums = loadPremiums(rules);
 
         OffsetDateTime now = OffsetDateTime.now();
         int triggered = 0;
         for (AlertRule rule : rules) {
             try {
-                if (evaluationService.evaluate(rule, latest.get(rule.getInstrumentId()), now).isPresent()) {
+                if (evaluationService.evaluate(rule, latest.get(rule.getInstrumentId()),
+                        premiums.get(rule.getInstrumentId()), now).isPresent()) {
                     triggered++;
                 }
             } catch (Exception e) {
@@ -90,6 +101,34 @@ public class AlertEvaluationJob {
         }
         if (triggered > 0) {
             log.info("本轮评估触发 {} 条告警（规则共 {} 条）", triggered, rules.size());
+        }
+    }
+
+    /**
+     * 只有存在溢价类规则时才查基金参考数据：每轮都多查两次库，对 P0 的纯行情规则是纯粹的浪费。
+     * 单个规则的类型不认识也不能拖垮整轮评估（历史遗留的脏 ruleType 不该让告警全停）。
+     */
+    private Map<Long, com.stockcat.web.dto.FundPremiumResponse> loadPremiums(List<AlertRule> rules) {
+        LinkedHashSet<Long> premiumIds = new LinkedHashSet<>();
+        for (AlertRule rule : rules) {
+            try {
+                if (registry.get(rule.getRuleType()).requiresPremium()) {
+                    premiumIds.add(rule.getInstrumentId());
+                }
+            } catch (Exception e) {
+                log.warn("规则 {} 类型不可用（{}），本轮跳过", rule.getId(), rule.getRuleType());
+            }
+        }
+        if (premiumIds.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            var instruments = instrumentMapper.selectByIds(new ArrayList<>(premiumIds));
+            return fundReferenceService.latestPremiums(instruments);
+        } catch (Exception e) {
+            // 溢价取不到时溢价类规则不触发（而不是崩掉整轮），行情类告警照常
+            log.warn("溢价数据获取失败，本轮溢价类规则跳过: {}", e.getMessage());
+            return Map.of();
         }
     }
 }

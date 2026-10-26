@@ -10,6 +10,59 @@ spring:
 server:
   port: 8081
 
+stockcat:
+  # 历史行情适配器（backend-python，独立进程，默认 8100）。
+  # 未启动时：只影响历史同步与 K 线查询，实时采集、告警照常工作。
+  history-source:
+    base-url: ${STOCKCAT_HISTORY_URL:http://127.0.0.1:8100}
+    timeout-seconds: 15
+  history:
+    # 收盘后同步最近 N 根日 K（前复权）。250 覆盖指标预热，500 是硬上限。
+    sync:
+      enabled: true
+      cron: "0 35 15 * * MON-FRI"
+      days: 120
+      # true 时启动后补跑一次，用于「收盘时服务没开」
+      on-startup: false
+    # 该时刻之后才认为当日 K 线已收盘（不写半根 K 线）
+    close-time: "15:05"
+  alert:
+    indicator:
+      # 指标类告警（MACD/KDJ 穿越、RSI 穿越阈值）
+      enabled: true
+      # 收盘后评估：15:35 同步 K 线，留 5 分钟缓冲；K 线没同步到会如实报"数据不足"
+      cron: "0 40 15 * * MON-FRI"
+      # 参与计算的 K 线根数与复权口径，需与 kline_daily 中实际落库的口径一致
+      adjust: qfq
+      bars: 250
+  # 基金参考数据（P1.4）：IOPV 走 Java 直连，净值走 Python 适配器
+  fund:
+    quote-source:
+      # 腾讯行情：ETF 的 IOPV 与最新价（GBK，字段位见 TencentFundClient）
+      base-url: ${STOCKCAT_TENCENT_QUOTE_URL:https://qt.gtimg.cn}
+      timeout-seconds: 5
+    nav-source:
+      # 与历史行情同一个 Python 进程，默认复用 history-source 的地址
+      base-url: ${STOCKCAT_HISTORY_URL:http://127.0.0.1:8100}
+      timeout-seconds: 15
+    nav:
+      enabled: true
+      # 实测 T 日净值当晚才公布（22:40 已能看到），故放在 21:30；缺失由次日窗口幂等补齐
+      cron: "0 30 21 * * MON-FRI"
+      days: 30
+      # 桌面端常不是常开，启动时补一次，否则 LOF 的净值基准会一直停在旧日期
+      on-startup: true
+  # 持仓快照（P1.5）：收盘价用不复权口径，快照可整段重建
+  position:
+    snapshot:
+      enabled: true
+      # 15:35 同步日 K、15:40 评估指标告警，快照放 15:45 才拿得到当天收盘价
+      cron: "0 45 15 * * MON-FRI"
+      # 每次重建最近 N 天（改过流水时靠区间重建把历史一起纠回来）
+      days: 30
+      # 桌面端不常开：启动时补跑一次，已是最新快照日则跳过
+      on-startup: true
+
 mybatis:
   # Mapper XML 位置（P0.2 起补充）
   mapper-locations: classpath:mapper/**/*.xml

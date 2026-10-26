@@ -56,6 +56,15 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 
 示例名称和代码仅为契约示例，不代表真实行情数据。
 
+### `GET /instruments/{id}`
+
+单个标的主数据（P1.7 详情页按 id 直开用，不再靠列表搜索猜）。不存在返回 `404 NOT_FOUND`（`标的不存在: id=…`）。
+
+```json
+{"id": 1, "market": "CN_A", "symbol": "600519", "name": "贵州茅台", "type": "STOCK", "currency": "CNY"}
+```
+
+
 ### `POST /watchlist`
 
 请求（`name` 可选：P0.3 起服务端从行情源自动验证并补全名称；行情源不可用且未提供名称时返回错误，不创建无法验证的标的）：
@@ -136,6 +145,130 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 
 不保证供应商实时可用；前端需显示部分成功状态。
 
+### 历史日 K（P1，已实现）
+
+日 K 由 Python 适配器抓取、Java 校验后落库（原则：抓取在 Python，业务判定在 Java）。
+
+#### `GET /instruments/{id}/klines`
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `adjust` | `qfq` | `qfq` 前复权 / `hfq` 后复权 / `raw` 不复权；其他值 `400 VALIDATION_ERROR` |
+| `limit` | 120 | 1~500。上限 500 是因为前复权长窗口会把早期价格算成负数 |
+| `end` | — | 截止交易日（含），`YYYY-MM-DD` |
+
+返回按 `date` **升序**排列的已落库数据：
+
+```json
+{"instrumentId": 1, "symbol": "600519", "adjust": "qfq", "count": 2,
+ "sourceCode": "eastmoney-push2his", "lastFetchedAt": "2026-10-26T11:38:31Z",
+ "bars": [{"date": "2026-10-26", "open": 1325.4, "high": 1350.0, "low": 1324.79, "close": 1349.98,
+           "volume": 41599.0, "amount": 5574287630.0, "changePercent": 1.12, "turnoverRate": 0.33}]}
+```
+
+- **`count = 0` 表示尚未同步**，不是"该标的没有行情"。前端应提示先同步，不能画成一条水平假线。
+- `volume` 单位为手，`amount` 单位为元；价格是复权后口径。
+
+#### `POST /instruments/{id}/history/sync`
+
+参数 `days`（默认 120，1~500）、`adjust`（默认 qfq）。幂等（UPSERT），可反复调用。返回：
+
+```json
+{"instrumentId": 1, "symbol": "600519", "adjust": "qfq", "status": "SUCCESS", "code": null, "message": null,
+ "requestedLimit": 8, "accepted": 8, "rejectedUnclosed": 0, "rejectedInvalid": 0, "skippedUpstream": 0,
+ "source": "eastmoney-push2his", "elapsedMs": 804}
+```
+
+- `status`：`SUCCESS` 有数据落库 / `FAILED` 未取到可用数据 / `SKIPPED` 代码规则不覆盖（如北交所），未请求上游。
+- `rejectedUnclosed`：上游返回了尚未收盘的当日 K 线，被拒写；`rejectedInvalid`：负价等脏行被拒写。
+  这两个数必须暴露给前端/日志，不能只看 `accepted` 就认定全部成功。
+- 失败码：`NO_DATA` / `DATA_SOURCE_UNAVAILABLE` / `UPSTREAM_TIMEOUT` / `UPSTREAM_ERROR` / `NOT_SUPPORTED` / `UNSUPPORTED_SYMBOL` / `SYNC_ERROR`。
+- 上游（Python）未启动时返回 `FAILED` + `DATA_SOURCE_UNAVAILABLE`，**不影响**实时行情与告警。
+
+#### `POST /history/sync`
+
+参数 `days`。对"自选 ∪ 启用中的监控标的 ∪ 当前持仓"批量同步，返回
+`{instruments, succeeded, failed, skipped, elapsedMs, results[]}`，用于首次建仓或历史缺口修复。
+
+### 技术指标（P1，已实现）
+
+指标**不落库**，按查询现算（决策 D2）：避免"K 线被修正 → 指标失效"的一致性负担。
+全部口径对齐通达信：MACD 柱 = 2×(DIF−DEA)、RSI 用 SMA(X,N,1) 递推、KDJ 的 K/D 用 SMA 递推且 J = 3K−2D。
+
+#### `GET /instruments/{id}/indicators`
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `adjust` | `qfq` | 与 K 线一致 |
+| `limit` | 250 | 参与计算的 K 线根数，1~500 |
+
+```json
+{"instrumentId": 1, "symbol": "600519", "adjust": "qfq", "count": 120,
+ "requiredBars": {"macd": 34, "rsi6": 7, "rsi12": 13, "rsi24": 25, "kdj": 9},
+ "points": [{"date": "2026-10-26", "close": 1349.98, "dif": 15.151410, "dea": 7.141003,
+             "macdHist": 16.020815, "rsi6": 75.4697, "rsi12": 68.1405, "rsi24": 60.1525,
+             "k": 84.2160, "d": 79.4304, "j": 93.7871}]}
+```
+
+- `points` 与 K 线**逐根对齐**（同下标同日期），前端可按 index 直接叠多副图。
+- **预热不足的字段为 `null`，不是 0**：0 会被画成贴底的线，看起来像"指标到极值"。
+  首根有值的下标：`dif/dea/macdHist` = 33、`rsi6` = 6、`rsi12` = 12、`rsi24` = 24、`k/d/j` = 8。
+- `count < requiredBars` 时对应字段整列为 `null`，前端应提示"先同步更多历史"，
+  而不是把空图当成"没有指标"。
+- `j` 允许 >100 或 <0（`J = 3K−2D` 的正常结果），前端**不要裁剪**，否则和看盘软件对不上。
+- 价格连续不变导致 RSI 分母为 0 时返回 `null`（无定义），不返回 0。
+
+### 基金参考数据与溢价（P1.4，已实现）
+
+数据两条路：**IOPV + 价格**由 Java 直连腾讯（`tencent-qt`，随行情每 15 秒刷新）；
+**单位净值**由 Java → Python 适配器取天天基金 `f10/lsjz`（`eastmoney-f10-lsjz`，每晚 21:30 + 启动补跑）。
+净值必须带 `navDate`——没有日期的净值不展示、不算溢价。
+
+溢价率**不落库**，查询时现算，三条规则（对应决策 D5 与 DATA_SOURCES §3.1）：
+
+1. ETF 有 IOPV → `premiumBasis=IOPV`，`premiumAsOf` 为 IOPV 时间戳；
+2. 没有 IOPV（LOF/取数失败）→ 用**带日期**的最近净值，`premiumBasis=NAV`，`premiumAsOf` 为净值日期，
+   `navStaleDays` = 净值日期距行情日的自然日数（LOF 盘中必然 ≥1，前端要说明"这是拿 T-x 净值算的"）；
+3. 两者都缺 → `premiumRate=null`。**不用 idx77**（上游对 LOF 的基准是 T-1 净值却无标注）。
+
+#### `GET /instruments/{id}/fund-reference?days=30`
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `days` | 30 | 最近 N 个交易日，1~250 |
+
+```json
+{"instrumentId": 2, "symbol": "510300", "type": "ETF", "applicable": true, "reason": null,
+ "latest": {"tradeDate": "2026-10-26", "price": 4.179, "iopv": 4.1782, "iopvTime": "2026-10-26T08:14:32Z",
+            "nav": 4.1797, "navDate": "2026-10-26", "navStaleDays": 0,
+            "premiumRate": 0.0191, "premiumBasis": "IOPV", "premiumAsOf": "2026-10-26T08:14:32Z",
+            "priceSource": "tencent-qt", "navSource": "eastmoney-f10-lsjz", "fetchedAt": "..."},
+ "history": [ ...同样结构的按天倒序列表 ]}
+```
+
+- **股票**返回 `applicable=false` + `reason`（不是 404——"没有这个概念"与"查不到"是两件事）；
+- `latest` 为 null + `reason` 说明尚未同步；`history` 每行用**当天自己**的基准算溢价，
+  不拿今天的净值去算昨天的；
+- 手算核对（2026-10-26 实测）：510300 `(4.179−4.1782)/4.1782×100 = 0.0191` ✅；
+  161725（LOF）`(0.544−0.5459)/0.5459×100 = −0.348`、基准 NAV ✅。
+
+#### `GET /fund-references/latest?instrumentIds=1,2`
+
+批量取当前溢价（自选列表用），返回以 instrumentId 为键的 Map；**股票不在结果里**，前端显示 —。
+
+#### `POST /instruments/{id}/fund-reference/refresh`
+
+手动刷新单只基金：腾讯行情 + Python 净值两条都跑。返回：
+
+```json
+{"instrumentId": 2, "symbol": "510300", "marketUpdated": true, "navWritten": 30, "navSkipped": 0,
+ "status": "SUCCESS", "code": null, "message": null, "elapsedMs": 277}
+```
+
+- `status`：SUCCESS 两路都成 / PARTIAL 一路成（如 Python 未启动但 IOPV 成功）/ FAILED 都没成；
+- 失败码：`DATA_SOURCE_UNAVAILABLE`（点名 Python 服务）等；
+- 调度：净值同步每晚 21:30（`stockcat.fund.nav.cron`，实测 T 日净值当晚才公布）+ 启动补跑（`on-startup: true`）。
+
 ## 4. 告警规则
 
 ### `GET /alert-rules`
@@ -159,18 +292,52 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 }
 ```
 
-P0 支持的 `ruleType` 与 `params`：
+支持的 `ruleType` 与 `params`：
 
-| ruleType | params | 说明 |
-|---|---|---|
-| `PRICE_ABOVE` / `PRICE_BELOW` | `{"threshold": 10.5}` | 最新价 ≥/≤ 阈值（含边界） |
-| `CHANGE_PERCENT_ABOVE` / `CHANGE_PERCENT_BELOW` | `{"threshold": -20}` | 涨跌幅阈值，百分数值，跌 20% 填 -20 |
+| ruleType | params | 评估时机 | 说明 |
+|---|---|---|---|
+| `PRICE_ABOVE` / `PRICE_BELOW` | `{"threshold": 10.5}` | 盘中每 30 秒 | 最新价 ≥/≤ 阈值（含边界） |
+| `CHANGE_PERCENT_ABOVE` / `CHANGE_PERCENT_BELOW` | `{"threshold": -20}` | 盘中每 30 秒 | 涨跌幅阈值，百分数值，跌 20% 填 -20 |
+| `MACD_GOLDEN_CROSS` / `MACD_DEATH_CROSS` | `{}` | 收盘后 15:40 | DIF 上穿/下穿 DEA，需 ≥35 根日 K |
+| `KDJ_GOLDEN_CROSS` / `KDJ_DEATH_CROSS` | `{}` | 收盘后 15:40 | K 上穿/下穿 D，需 ≥10 根日 K |
+| `RSI_CROSS_ABOVE` / `RSI_CROSS_BELOW` | `{"period": 6, "threshold": 80}` | 收盘后 15:40 | RSI 上穿/下穿阈值；`period` 只允许 6/12/24，`threshold` 0~100 |
 
-P1 计划：`PREMIUM_ABOVE`/`PREMIUM_BELOW`（溢价率）、`INDICATOR_CROSS`（指标交叉，params 含指标与周期参数）。
+指标类规则的三条约定（都写进了实现，不是"看情况"）：
+
+1. **穿越语义，不是状态语义**：只有"上一根在另一侧、本根到这一侧"才触发。
+   DIF 在 DEA 上方连着一周不会每天推一条；代价是规则新增时已经交叉过的不会补发。
+2. **收盘后评估**：盘中当日 K 线未收盘，DIF 会在一天里反复穿越，用半根 K 线判金叉会推出"收盘并不存在"的信号。
+3. **按交易日去重**：`deduplication_key = rule-{id}-{交易日}`，同一天重复评估（含手动补跑）不会重复推送；
+   事件里 `observed_detail` 记录当根 K 线的指标值（`dif/dea/rsi6/k/d/j` 等），事后可复盘。
+
+尚未实现：`PREMIUM_ABOVE`/`PREMIUM_BELOW`（溢价率，等 P1.4 的 IOPV 数据）、`INDICATOR_CROSS`（通用指标交叉，已由上面四个具体类型覆盖，不再单独实现）。
 
 批量创建：`POST /alert-rules/batch`，请求 `{"instrumentIds":[3,4,5], "ruleType":"CHANGE_PERCENT_BELOW", "params":{"threshold":-20}, ...}`，一次为多个监控标的创建相同类型与参数的规则；返回逐条成功/失败结果，部分失败不影响其他标的。
 
 响应 `201 Created`，返回规则字段及 `createdAt`。
+
+### `POST /alert-rules/indicator/evaluate`
+
+手动触发指标类规则评估（收盘后任务在 15:40 自动跑；这个入口用于补跑和验证，不必等到收盘）。
+
+参数：`instrumentId`（可选，不传则评估全部启用中的指标类规则）。
+
+```json
+{"instruments": 1, "rules": 4, "triggered": 2, "elapsedMs": 3106, "adjust": "qfq",
+ "results": [{"ruleId": 6, "ruleName": "茅台 RSI6 上穿70", "symbol": "600519",
+              "ruleType": "RSI_CROSS_ABOVE", "status": "TRIGGERED", "tradeDate": "2026-10-26",
+              "requiredBars": 8, "availableBars": 120, "message": "已生成告警事件并派发通知"}]}
+```
+
+`status` 六种取值，用来回答"为什么没提醒我"：
+
+| status | 含义 |
+|---|---|
+| `TRIGGERED` | 触发并生成事件 |
+| `NOT_TRIGGERED` | 最近两根没有穿越信号（当天已触发过的也会显示这个，被去重键抑制） |
+| `SKIPPED_INSUFFICIENT_BARS` | K 线不足，`requiredBars` / `availableBars` 给出具体数字 |
+| `SKIPPED_NO_KLINES` | 该标的还没同步过日 K，`message` 里给出同步命令 |
+| `ERROR` | 参数或类型异常，`message` 为原因 |
 
 ### `PATCH /alert-rules/{id}`
 
@@ -247,6 +414,61 @@ P1 计划：`PREMIUM_ABOVE`/`PREMIUM_BELOW`（溢价率）、`INDICATOR_CROSS`�
 ```
 快照缺失或过期时 `lastPrice/marketValue/unrealizedPnl` 为 `null` 并标注 `priceStatus`，不得按 0 计算。
 
+### `GET /portfolio/equity-curve`（P1.5）
+参数：`from`、`to`（ISO 日期，均可省略）。省略 `to` 取库里最新快照日；省略 `from` 取 `to − 180 天`；区间上限 3 年。
+
+```json
+{"from": "2026-04-29", "to": "2026-10-26",
+ "points": [
+   {"tradeDate": "2026-10-26", "marketValue": 150240.00, "costValue": 150300.00,
+    "unrealizedPnl": -60.00, "realizedPnlCum": 28.00, "totalPnl": -32.00,
+    "positions": 1, "pricedPositions": 1, "complete": true}
+ ],
+ "summary": {"firstDate": "2026-04-29", "lastDate": "2026-10-26",
+             "startMarketValue": 149000.00, "endMarketValue": 150240.00, "marketValueChange": 1240.00,
+             "endCostValue": 150300.00, "endUnrealizedPnl": -60.00, "endRealizedPnlCum": 28.00,
+             "endTotalPnl": -32.00, "netInvested": 150305.00, "returnPct": -0.02},
+ "lastSnapshotDate": "2026-10-26", "priceAdjust": "raw",
+ "note": "简单收益：总盈亏 = 当前市值 − 净投入资金……"}
+```
+
+口径（写在 `note` 里，前端原样展示）：
+
+- 每个点是"该交易日收盘"的组合状态，由 `position_snapshot` 按日聚合；组合层不建表。
+- `totalPnl = unrealizedPnl + realizedPnlCum`；`netInvested = Σ买入(金额+费用) − Σ卖出(金额−费用)`；
+  `returnPct = totalPnl / netInvested`。**未做资金加权（TWR），也未调整分红/送股**，出入金会直接改变分母。
+- `complete=false`：当天有持仓取不到收盘价，`marketValue/unrealizedPnl` 只汇总了能取到价的部分。
+  最后一天 `complete=false` 时 `returnPct` 为 `null`（分子只算了一半，比值没有意义）。
+
+### `GET /portfolio/position-changes`（P1.5）
+参数同 `equity-curve`。返回区间内每个标的的期初/期末与变化量：
+
+```json
+[{"instrumentId": 2, "symbol": "510300", "name": "沪深300ETF华泰柏瑞",
+  "openDate": "2026-10-23", "closeDate": "2026-10-26",
+  "openQuantity": 1000, "closeQuantity": 600, "quantityDelta": -400,
+  "openAvgCost": 4.105, "closeAvgCost": 4.105, "avgCostDelta": 0,
+  "openMarketValue": 4100, "closeMarketValue": 2502, "marketValueDelta": -1598,
+  "openUnrealized": 0, "closeUnrealized": 75, "unrealizedDelta": 75,
+  "realizedPnlInRange": 28, "realizedPnlCum": 28, "tradeCount": 1, "closed": false}]
+```
+
+- 期初取"区间起点之前的最后一条快照"；没有则 `openDate=null`、期初数量按 0，表示区间内才建仓。
+- 区间内开仓又清仓时，期初/期末都是 0，`quantityDelta=0`，用 `closed=true` + `realizedPnlInRange` 表达"中间发生过交易"。
+- `realizedPnlInRange = 期末累计已实现 − 期初累计已实现`。
+
+### `POST /portfolio/snapshots/rebuild`（P1.5）
+参数：`from`、`to`，默认最近 30 天到"今天"（`Asia/Shanghai`）。改过流水后手动重建。
+
+```json
+{"from": "2026-09-26", "to": "2026-10-26", "tradeDates": 18, "instruments": 1, "rows": 18,
+ "syncedInstruments": 1, "warnings": [], "elapsedMs": 820}
+```
+
+- 重建 = 先删区间再插（幂等），不做增量修补：快照不是事实来源，流水 + 收盘价才是。
+- 收盘价用**不复权**（`raw`）口径；缺价时该行 `marketValue/unrealizedPnl` 为 `null`，`warnings` 说明原因。
+- `warnings` 非空不等于失败。典型是标的缺不复权日线：先「同步历史」再重建。
+
 ## 7. 复盘与我的日记
 
 ### 市场复盘 `/recaps`（按交易日，一天一篇）
@@ -316,11 +538,19 @@ P1 计划：`PREMIUM_ABOVE`/`PREMIUM_BELOW`（溢价率）、`INDICATOR_CROSS`�
 
 - `GET /health`：Python 进程健康检查；不代表数据源或 Agent 已可用。
 
-### P1 数据适配器（内部契约草案）
+### P1 数据适配器（内部契约，已实现）
 
-- `GET /internal/v1/market-data/klines?market=CN_A&symbol=...&interval=1d&from=...&to=...`
-- `GET /internal/v1/funds/{symbol}/reference-data`  
-  返回值需包含 `source`, `marketTime`/`asOf`, `collectedAt`, `dataStatus`。Java 校验后持久化。只有数据源验证通过后才实现具体字段。
+仅供 Java 调用，不对前端暴露。
+
+- `GET /internal/v1/kline?secid=1.600519&period=daily&adjust=qfq&limit=250&end=2026-10-26`
+  - `secid` 由 Java 的 `SymbolMapping` 生成，Python 不掌握 A 股代码前缀规则（避免两份实现漂移）。
+  - P1 仅支持 `daily`；`limit` 上限 500；返回 `bars` 升序。
+  - 返回 `skippedBars` 报告上游脏行/重复行数量，Java 记入同步统计，不静默丢弃。
+  - 错误码：`NO_DATA`(404) / `NOT_SUPPORTED`(400) / `UPSTREAM_ERROR`(502) / `UPSTREAM_TIMEOUT`(504)，结构同 §1。
+  - 完整契约见 `backend-python/README.md`。
+- `GET /internal/v1/fund-nav?fundCode=510300&limit=30`（P1.4 已实现）
+  基金日终净值（天天基金 `lsjz`，带 `FSRQ` 净值日期）。`limit` 上限 250，上游单页只回 20 行，适配器内部翻页。
+  返回 `{source,fundCode,requestedLimit,fetchedAt,totalCount,count,skippedRows,items[]}`。完整契约见 `backend-python/README.md`。
 
 ### P2 Agent
 

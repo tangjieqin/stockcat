@@ -51,6 +51,11 @@ public class AlertRuleService {
         // 规则类型与参数校验（含边界语义说明见评估器实现）
         RuleEvaluator evaluator = registry.get(ruleType);
         evaluator.validateParams(parse(paramsJson));
+        // 溢价类规则只对 ETF/LOF 有意义：挂到股票上会变成永远不触发的死规则
+        if (evaluator.requiresPremium() && !FundReferenceService.isFundType(instrument.getInstrumentType())) {
+            throw ApiException.validationError(
+                    "溢价类规则仅适用于 ETF/LOF，该标的是 " + instrument.getInstrumentType());
+        }
         if (cooldownSeconds != null && cooldownSeconds < 0) {
             throw ApiException.validationError("cooldownSeconds 不能为负");
         }
@@ -109,6 +114,14 @@ public class AlertRuleService {
         RuleEvaluator evaluator = registry.get(targetType); // 未知类型在 registry.get 内报 VALIDATION_ERROR
         String effectiveParams = paramsJson != null ? paramsJson : existing.getParamsJson();
         evaluator.validateParams(parse(effectiveParams));
+        // 标的不能换，所以这里只需再挡一次"把股票规则改成溢价类型"
+        if (ruleType != null && evaluator.requiresPremium()) {
+            Instrument instrument = instrumentMapper.findById(existing.getInstrumentId());
+            if (instrument != null && !FundReferenceService.isFundType(instrument.getInstrumentType())) {
+                throw ApiException.validationError(
+                        "溢价类规则仅适用于 ETF/LOF，该标的是 " + instrument.getInstrumentType());
+            }
+        }
         ruleMapper.updateFields(id, name, ruleType, paramsJson, cooldownSeconds, enabled);
         return ruleMapper.findById(id);
     }

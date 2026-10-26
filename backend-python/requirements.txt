@@ -1,2 +1,6 @@
 fastapi>=0.115
 uvicorn[standard]>=0.32
+httpx>=0.28
+pytest>=8.3
+# Windows 无系统时区库，zoneinfo 需要它（Linux/macOS 上为无操作）
+tzdata>=2025.1

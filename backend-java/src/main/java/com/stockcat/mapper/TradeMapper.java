@@ -3,6 +3,7 @@ package com.stockcat.mapper;
 import com.stockcat.domain.Trade;
 import org.apache.ibatis.annotations.*;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -71,6 +72,38 @@ public interface TradeMapper {
 
     @Select("SELECT DISTINCT instrument_id FROM trade_record ORDER BY instrument_id")
     List<Long> selectDistinctInstrumentIds();
+
+    /** 全量流水（升序），持仓快照重建时一次读入，避免 N 次单标的查询。 */
+    @Select("""
+            SELECT t.*, i.symbol, i.name AS instrument_name
+            FROM trade_record t
+            JOIN instrument i ON i.id = t.instrument_id
+            ORDER BY t.trade_time ASC, t.id ASC
+            """)
+    List<Trade> selectAllOrderByTime();
+
+    /** 某标的在 [from, to] 内的成交笔数（持仓变化表用，说明变化是交易造成还是价格造成）。 */
+    @Select("""
+            SELECT count(*) FROM trade_record
+            WHERE instrument_id = #{instrumentId} AND trade_time >= #{from} AND trade_time <= #{to}
+            """)
+    long countInRange(@Param("instrumentId") Long instrumentId,
+                      @Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to);
+
+    /**
+     * 截至某时点的净投入资金 = Σ 买入(金额+费用) − Σ 卖出(金额−费用)。
+     *
+     * <p>用来算"简单收益"：总盈亏 = 当前市值 − 净投入。它与"浮动盈亏 + 累计已实现"在数学上等价
+     * （两者都基于同一套摊薄成本），但直接给净投入能让收益率有个说得通的分母。
+     */
+    @Select("""
+            SELECT COALESCE(SUM(CASE WHEN direction = 'BUY'
+                                     THEN price * quantity + fee
+                                     ELSE -(price * quantity - fee) END), 0)
+            FROM trade_record
+            WHERE trade_time <= #{until}
+            """)
+    BigDecimal netInvestedUntil(@Param("until") OffsetDateTime until);
 
     @Delete("DELETE FROM trade_record WHERE id = #{id}")
     int deleteById(@Param("id") Long id);

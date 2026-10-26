@@ -63,6 +63,15 @@ export async function listIndices(): Promise<IndexQuote[]> {
   return resp.data
 }
 
+/** 批量取最新快照（后端返回以 instrumentId 为键的 Map）。 */
+export async function getLatestQuotes(instrumentIds: number[]): Promise<Record<string, Quote>> {
+  const resp = await http.get<Record<string, Quote>>('/quotes/latest', {
+    // 后端声明 List<Long>，用逗号串由 Spring 默认转换器切分，避免 axios 序列化成 instrumentIds[]
+    params: { instrumentIds: instrumentIds.join(',') },
+  })
+  return resp.data
+}
+
 /** 涨跌幅颜色：A 股红涨绿跌 */
 export function changeColor(changePercent: number | null | undefined): string {
   if (changePercent == null) return 'var(--text-primary)'

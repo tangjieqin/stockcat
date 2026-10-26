@@ -3,6 +3,7 @@ package com.stockcat.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stockcat.domain.AlertRule;
 import com.stockcat.service.AlertRuleService;
+import com.stockcat.service.IndicatorAlertService;
 import com.stockcat.web.dto.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -21,10 +22,13 @@ import java.util.List;
 public class AlertRuleController {
 
     private final AlertRuleService service;
+    private final IndicatorAlertService indicatorAlertService;
     private final ObjectMapper objectMapper;
 
-    public AlertRuleController(AlertRuleService service, ObjectMapper objectMapper) {
+    public AlertRuleController(AlertRuleService service, IndicatorAlertService indicatorAlertService,
+                               ObjectMapper objectMapper) {
         this.service = service;
+        this.indicatorAlertService = indicatorAlertService;
         this.objectMapper = objectMapper;
     }
 
@@ -70,6 +74,18 @@ public class AlertRuleController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 手动触发指标类规则评估（P1.6）。收盘后任务在 15:40 自动跑；这个入口用于补跑与验证：
+     * 不用等到收盘，也不用改系统时间。
+     *
+     * @param instrumentId 只评估某只标的；不传则评估全部启用中的指标类规则
+     */
+    @PostMapping("/alert-rules/indicator/evaluate")
+    public IndicatorAlertSummary evaluateIndicatorRules(
+            @RequestParam(required = false) Long instrumentId) {
+        return indicatorAlertService.evaluate(instrumentId);
     }
 
     private String toJson(java.util.Map<String, Object> params) {

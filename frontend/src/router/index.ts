@@ -21,9 +21,12 @@ const router = createRouter({
 
         // 我的股票
         { path: 'stocks/watchlist', name: 'watchlist', component: () => import('../views/WatchlistView.vue'), meta: { title: '自选列表' } },
+        // 详情页：只接受数字 id，避免和上面的字面路由抢匹配
+        { path: 'stocks/:id(\\d+)', name: 'instrument-detail', component: () => import('../views/InstrumentDetailView.vue'), meta: { title: '标的详情' } },
         { path: 'stocks/positions', name: 'positions', component: () => import('../views/PositionsView.vue'), meta: { title: '我的持仓' } },
         { path: 'stocks/trades', name: 'trades', component: () => import('../views/TradeRecordsView.vue'), meta: { title: '交易流水' } },
-        { path: 'stocks/position-changes', name: 'position-changes', component: () => import('../views/PlaceholderView.vue'), meta: { title: '持仓变化', phase: 'P1' } },
+        // 持仓变化自 P1.5 起并入持仓页的页签，旧链接重定向过去
+        { path: 'stocks/position-changes', redirect: { path: '/stocks/positions', query: { tab: 'changes' } } },
 
         // 复盘
         { path: 'recap/market', name: 'market-recap', component: () => import('../views/MarketRecapView.vue'), meta: { title: '市场复盘' } },

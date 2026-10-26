@@ -15,8 +15,10 @@ import {
   type WatchlistItem,
 } from '../api/quote'
 import { ApiError } from '../api/client'
+import { basisLabel, getLatestPremiums, premiumText, type FundPremium } from '../api/fund'
 
 const items = ref<WatchlistItem[]>([])
+const premiums = ref<Record<string, FundPremium>>({})
 const loading = ref(false)
 const errorMsg = ref('')
 const refreshing = ref(false)
@@ -32,11 +34,44 @@ async function load() {
   errorMsg.value = ''
   try {
     items.value = await listWatchlist()
+    await loadPremiums()
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 溢价只对 ETF/LOF 取；失败不影响行情显示（溢价是附加列，不能把整页拖成错误页）。
+ */
+async function loadPremiums() {
+  const ids = items.value.filter((i) => i.instrument.type !== 'STOCK').map((i) => i.instrument.id)
+  if (!ids.length) {
+    premiums.value = {}
+    return
+  }
+  try {
+    premiums.value = await getLatestPremiums(ids)
+  } catch {
+    premiums.value = {}
+  }
+}
+
+function premiumOf(instrumentId: number): FundPremium | null {
+  return premiums.value[String(instrumentId)] ?? null
+}
+
+function premiumHint(instrumentId: number): string {
+  const p = premiumOf(instrumentId)
+  if (!p) return '尚未同步基金参考数据（进入详情页点「刷新参考数据」）'
+  const nav = p.nav == null ? '—' : `${p.nav}${p.navDate ? `（${p.navDate}）` : ''}`
+  return [
+    `价格 ${p.price ?? '—'}`,
+    `IOPV ${p.iopv ?? '—'}`,
+    `净值 ${nav}`,
+    `基准 ${p.premiumBasis ?? '—'}${p.premiumAsOf ? ` @ ${p.premiumAsOf}` : ''}`,
+  ].join(' · ')
 }
 
 async function refreshAll() {
@@ -139,22 +174,40 @@ onMounted(load)
           <th>名称</th>
           <th>最新价</th>
           <th>涨跌幅</th>
+          <th>溢价</th>
           <th>昨收</th>
           <th>行情时间</th>
           <th>状态</th>
-          <th style="width: 90px">操作</th>
+          <th style="width: 130px">操作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="it in items" :key="it.id">
-          <td class="mono">{{ it.instrument.symbol }}</td>
+          <td class="mono">
+            <RouterLink class="detail-link" :to="`/stocks/${it.instrument.id}`">{{ it.instrument.symbol }}</RouterLink>
+          </td>
           <td>
-            {{ it.instrument.name }}
+            <RouterLink class="detail-link" :to="`/stocks/${it.instrument.id}`">{{ it.instrument.name }}</RouterLink>
             <span class="type-tag">{{ it.instrument.type }}</span>
           </td>
           <td class="mono">{{ it.quote?.lastPrice ?? '—' }}</td>
           <td class="mono" :style="{ color: changeColor(it.quote?.changePercent) }">
             {{ it.quote?.changePercent != null ? it.quote.changePercent + '%' : '—' }}
+          </td>
+          <td class="premium-cell">
+            <template v-if="it.instrument.type !== 'STOCK'">
+              <span
+                class="mono"
+                :title="premiumHint(it.instrument.id)"
+                :style="{ color: changeColor(premiumOf(it.instrument.id)?.premiumRate ?? null) }"
+              >
+                {{ premiumText(premiumOf(it.instrument.id)?.premiumRate ?? null) }}
+              </span>
+              <span v-if="premiumOf(it.instrument.id)" class="basis" :title="premiumHint(it.instrument.id)">
+                {{ basisLabel(premiumOf(it.instrument.id)!) }}
+              </span>
+            </template>
+            <span v-else class="muted">—</span>
           </td>
           <td class="mono">{{ it.quote?.previousClose ?? '—' }}</td>
           <td class="muted">{{ fmtTime(it.quote?.marketTime ?? null) }}</td>
@@ -165,7 +218,8 @@ onMounted(load)
             <span v-else class="badge off">—</span>
             <div v-if="it.quote" class="src">采集 {{ fmtTime(it.quote.collectedAt) }}</div>
           </td>
-          <td>
+          <td class="ops">
+            <RouterLink class="btn small" :to="`/stocks/${it.instrument.id}`">K 线</RouterLink>
             <button class="btn small danger" @click="remove(it)">移除</button>
           </td>
         </tr>
@@ -264,6 +318,17 @@ onMounted(load)
   padding: 0 4px;
   margin-left: 4px;
 }
+.premium-cell {
+  white-space: nowrap;
+}
+.basis {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 3px;
+  margin-left: 4px;
+}
 .src {
   font-size: 11px;
   color: var(--text-tertiary);
@@ -321,6 +386,8 @@ onMounted(load)
   font-size: 13px;
   cursor: pointer;
   color: var(--text-primary);
+  text-decoration: none;
+  display: inline-block;
 }
 .btn:hover {
   background: var(--bg-hover);
@@ -332,6 +399,20 @@ onMounted(load)
 }
 .btn.small {
   padding: 3px 8px;
+}
+.ops {
+  white-space: nowrap;
+}
+.ops .btn + .btn {
+  margin-left: 6px;
+}
+.detail-link {
+  color: inherit;
+  text-decoration: none;
+}
+.detail-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 .btn.danger {
   color: #b91c1c;

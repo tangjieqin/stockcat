@@ -34,34 +34,45 @@ public class HoldingComputationService {
      * 按传入顺序重放流水（调用方保证按 trade_time 升序）。任一笔卖出超卖即抛 409。
      */
     public HoldingState replay(List<Trade> trades) {
-        BigDecimal qty = BigDecimal.ZERO;
-        BigDecimal avgCost = BigDecimal.ZERO;
-        BigDecimal realized = BigDecimal.ZERO;
-
+        HoldingState state = HoldingState.EMPTY;
         for (Trade t : trades) {
-            BigDecimal q = t.getQuantity();
-            if ("BUY".equals(t.getDirection())) {
-                BigDecimal newQty = qty.add(q);
-                if (newQty.signum() > 0) {
-                    BigDecimal totalCost = qty.multiply(avgCost).add(q.multiply(t.getPrice())).add(t.getFee());
-                    avgCost = totalCost.divide(newQty, COST_SCALE, RoundingMode.HALF_UP);
-                }
-                qty = newQty;
-            } else if ("SELL".equals(t.getDirection())) {
-                if (q.compareTo(qty) > 0) {
-                    throw ApiException.conflict(
-                            "卖出数量超过当时持有量：当前可卖 " + qty.stripTrailingZeros().toPlainString()
-                                    + "，尝试卖出 " + q.stripTrailingZeros().toPlainString());
-                }
-                BigDecimal pnl = t.getPrice().subtract(avgCost).multiply(q).subtract(t.getFee());
-                realized = realized.add(pnl);
-                qty = qty.subtract(q);
-                if (qty.signum() == 0) {
-                    avgCost = BigDecimal.ZERO; // 清仓后成本清零
-                }
-            } else {
-                throw ApiException.validationError("未知交易方向: " + t.getDirection());
+            state = apply(state, t);
+        }
+        return state;
+    }
+
+    /**
+     * 单笔推进。把"一笔流水如何改变持仓"单独暴露出来，是为了让 P1.5 的每日快照
+     * 可以按日期增量推进，而不是再写一遍摊薄成本公式——两处实现迟早会算出两个答案。
+     * 语义与 {@link #replay(List)} 完全一致（含超卖 409）。
+     */
+    public HoldingState apply(HoldingState state, Trade t) {
+        BigDecimal qty = state == null ? BigDecimal.ZERO : state.quantity();
+        BigDecimal avgCost = state == null ? BigDecimal.ZERO : state.avgCost();
+        BigDecimal realized = state == null ? BigDecimal.ZERO : state.realizedPnl();
+
+        BigDecimal q = t.getQuantity();
+        if ("BUY".equals(t.getDirection())) {
+            BigDecimal newQty = qty.add(q);
+            if (newQty.signum() > 0) {
+                BigDecimal totalCost = qty.multiply(avgCost).add(q.multiply(t.getPrice())).add(t.getFee());
+                avgCost = totalCost.divide(newQty, COST_SCALE, RoundingMode.HALF_UP);
             }
+            qty = newQty;
+        } else if ("SELL".equals(t.getDirection())) {
+            if (q.compareTo(qty) > 0) {
+                throw ApiException.conflict(
+                        "卖出数量超过当时持有量：当前可卖 " + qty.stripTrailingZeros().toPlainString()
+                                + "，尝试卖出 " + q.stripTrailingZeros().toPlainString());
+            }
+            BigDecimal pnl = t.getPrice().subtract(avgCost).multiply(q).subtract(t.getFee());
+            realized = realized.add(pnl);
+            qty = qty.subtract(q);
+            if (qty.signum() == 0) {
+                avgCost = BigDecimal.ZERO; // 清仓后成本清零
+            }
+        } else {
+            throw ApiException.validationError("未知交易方向: " + t.getDirection());
         }
         return new HoldingState(qty, avgCost, realized);
     }

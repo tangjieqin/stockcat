@@ -30,7 +30,7 @@
 | `diary_node`                     | 我的日记（树状笔记本）| P0 |
 | `kline`                          | 历史 K 线         | P1 |
 | `indicator_result`               | 技术指标结果         | P1 |
-| `fund_valuation`                 | 基金参考估值/净值/IOPV | P1 |
+| `fund_reference`                 | 基金 IOPV/净值快照（溢价查询层算） | P1 |
 | `position_snapshot`              | 历史持仓快照        | P1 |
 | `ai_recap`                       | AI 复盘记录        | P2 |
 | `knowledge_document` / embedding | 资料检索           | P3 |
@@ -95,7 +95,10 @@
 - `id BIGINT PK`
 - `name VARCHAR(128) NOT NULL`
 - `instrument_id BIGINT NOT NULL FK -> instrument.id`
-- `rule_type VARCHAR(32) NOT NULL`：**可插拔的规则类型标识**，不同标的可搭配不同类型。P0：`PRICE_ABOVE`、`PRICE_BELOW`、`CHANGE_PERCENT_ABOVE`、`CHANGE_PERCENT_BELOW`；P1 计划：`PREMIUM_ABOVE`（溢价率）、`PREMIUM_BELOW`、`INDICATOR_CROSS`（指标交叉）等。
+- `rule_type VARCHAR(32) NOT NULL`：**可插拔的规则类型标识**，不同标的可搭配不同类型。
+  已实现：`PRICE_ABOVE`、`PRICE_BELOW`、`CHANGE_PERCENT_ABOVE`、`CHANGE_PERCENT_BELOW`（盘中评估）；
+  `MACD_GOLDEN_CROSS`、`MACD_DEATH_CROSS`、`KDJ_GOLDEN_CROSS`、`KDJ_DEATH_CROSS`、`RSI_CROSS_ABOVE`、`RSI_CROSS_BELOW`（收盘后评估）。
+  待实现：`PREMIUM_ABOVE`、`PREMIUM_BELOW`（等 IOPV 数据接入）。
 - `params JSONB NOT NULL`：规则参数，结构由 `rule_type` 决定，Java 侧按类型校验：
   - 价格类：`{"threshold": 10.5}`
   - 涨跌幅类：`{"threshold": -20}`（百分数值，跌 20% 为 -20）
@@ -109,6 +112,7 @@
 - 校验：`cooldown_seconds >= 0`；`params` 必须通过该 `rule_type` 的参数 schema 校验；创建时校验该类型所需数据已接入（如溢价率规则要求 IOPV 数据可用），否则拒绝，避免建了永不触发的"死规则"。
 - 索引：`(enabled, instrument_id)`
 - 扩展方式：新增规则类型 = 新增一个 `rule_type` 值 + 一个 evaluator 实现 + 一个参数 schema，**不修改表结构**。
+- 去重键格式随输入类型不同：行情类 `rule-{id}-{触发分钟}`（同一分钟内不重复），指标类 `rule-{id}-{交易日}`（一天一次）。
 - 多规则语义：**同一标的可挂任意多条规则**（`instrument_id` 无唯一约束），每条规则独立评估、独立冷却、独立产生事件与通知；同一时刻多条规则同时满足时生成多条并列的 `alert_event`，不合并。
 
 ### 3.6 `alert_event`
@@ -209,22 +213,70 @@
 
 ## 4. P1/P2 扩展表概要
 
-### `kline`
+### `kline_daily`（P1.2 已实现，迁移 V4）
 
-- `id`, `instrument_id`, `interval_code`（如 `1d`、`1m`，只允许已验证周期）、`open`, `high`, `low`, `close`, `volume`, `turnover`, `bar_time`, `source_code`, `collected_at`
-- 唯一约束：`UNIQUE(instrument_id, interval_code, bar_time, source_code)`
+P1 只做日线（决策 D3），表名直接叫 `kline_daily`，不引入 `interval_code` 多周期维度。
+
+- `id`, `instrument_id` FK, `trade_date DATE`, `adjust`（`qfq`/`hfq`/`raw`），`open`/`high`/`low`/`close` `NUMERIC(20,6)`,
+  `volume`（手）/ `amount`（元）, `change_percent`, `turnover_rate`, `source_code`, `fetched_at`
+- 唯一约束：`UNIQUE(instrument_id, trade_date, adjust)`；同步用 **UPSERT**。
+  理由（决策 D4）：**前复权的历史值会随除权整体移动**，只做增量 INSERT 会让除权前的历史价格永久错误。
+- 约束：`open/high/low/close > 0` 与 `high >= low`。前复权长窗口会把早期价格算成负数（实测茅台 2001-08-27 为 -312.68），
+  Java 侧先拦截，DB 再兜一层。
+- 索引：`(instrument_id, adjust, trade_date DESC)`
+- 不落库的：指标值（决策 D2，查询时计算）、上游未收盘的当日 K 线（写入前由 Java 拒绝）。
+
+原 `kline` 表设计（含 `interval_code`、`bar_time`，唯一键含 `source_code`）保留作 P3 多周期扩展参考；
+届时若支持分钟线，新建 `kline_minute` 而非改造 `kline_daily`。
 
 ### `indicator_result`
 
 - `id`, `instrument_id`, `interval_code`, `indicator_code`, `parameters_json JSONB`, `value_json JSONB`, `bar_time`, `calculated_at`, `engine_version`
 - 唯一约束应包含标的、周期、指标、参数和 bar 时间；实现时需确定参数规范化方式。
-- 指标由 Java ta4j 统一计算。
+- 指标由 Java 统一计算（P1 实际做法是**不落库**、按查询现算，见 `PLAN_P1.md` D2；本表仅作为将来需要缓存时的设计参考）。
 
-### `fund_valuation`
+### `fund_reference`（P1.4 已实现，迁移 V5）
 
-- `id`, `instrument_id`, `market_time`, `collected_at`, `market_price`, `iopv`, `nav`, `premium_rate`, `source_code`, `data_status`
-- `premium_rate` 单位为百分数值。
-- IOPV、NAV 和场内价格的含义、时点与可用性必须按产品类型和数据源核实。
+一行 = 一个基金在一个交易日的观测。**溢价率不落库**（它依赖当下价格，存下来就会过期），查询时现算。
+
+- `id`, `instrument_id` FK, `trade_date DATE`（行情日期；净值补写行的 trade_date = nav_date）
+- `price`（采集当时价格，用于事后核对"当时溢价"）、`iopv`、`iopv_time`（仅 ETF，盘中每 15 秒刷新）
+- `nav`、`nav_date`（单位净值与净值所属日期，来自天天基金 lsjz；**必须有日期才展示/参与溢价计算**）
+- `market_source_code` / `nav_source_code`：两个来源分开记——IOPV 来自腾讯，净值来自天天基金，
+  用一列表达必然要说谎
+- 约束：`UNIQUE(instrument_id, trade_date)`（盘中反复刷新与晚间补净值落在同一行，两条 UPSERT 都用
+  `COALESCE(EXCLUDED.x, ...)`，先写的字段不会被后来的空值覆盖）；`nav/iopv/price` 非正值拒绝（DB 兜底）；
+  `nav/iopv/price` 至少有一个非空
+- 索引：`(instrument_id, trade_date DESC)`
+- 写入时序：盘中随行情采集写 `price/iopv` → 晚间 21:30（+启动补跑）按最近 N 期 UPSERT `nav/nav_date`
+- 数据形态示例：ETF 白天 = price+iopv（nav 为空）；晚上 = price+iopv+nav（溢价用 IOPV）；
+  历史未同步行情的净值行 = 仅 nav
+
+原 `fund_valuation` 概要表（含 `premium_rate`、`data_status` 列）作废：溢价率现算不落库，
+数据状态由 `iopv_time` / `nav_date` 直接表达，不再需要单独的状态列。
+
+### `position_snapshot`（P1.5 已实现，迁移 V6）
+
+一行 = 一个标的在一个交易日的收盘持仓。**不是事实来源**：事实是 `trade_record` + `kline_daily`，
+快照只是"按流水重放到那天"的结果，因此允许整段删除重建（重建 = 先删区间再插，不做增量修补）。
+
+- `id`, `trade_date DATE`, `instrument_id` FK, `quantity NUMERIC(24,4)`, `avg_cost NUMERIC(20,6)`
+- `cost_value`：持仓成本 = `quantity × avg_cost`（avg_cost 已含买入费用）。落库是为了聚合时不再乘一遍，
+  也避免各调用点舍入不一致。
+- `close_price`、`market_value`、`unrealized_pnl`：三者同时有值或同时为 `null`。取不到收盘价时留 `null`，
+  **不按 0 汇总**（否则曲线会在某天突然塌下去）。
+- `realized_pnl_cum`：**截至当日累计**已实现盈亏（摊薄成本法、已扣卖出费用），不是当日发生额。
+  区间已实现 = 期末 − 期初。
+- `price_adjust`：实际取价口径。**固定 `raw`（不复权）**——`avg_cost` 是真实成交价，
+  前复权价随除权整体下移，两者直接相减会算出"每年亏一笔分红"的假曲线。
+- `source_code`、`created_at`
+- 约束：`UNIQUE(trade_date, instrument_id)`；`quantity >= 0`；`close_price IS NULL OR close_price > 0`
+- 索引：`(trade_date DESC)`
+
+日期轴 = 「该标的实际有收盘价的交易日 ∪ 有成交的日期」：停牌日沿用最近一个收盘价（floor），
+节假日不会凭空多出点。清仓当天写一行 `quantity=0`（市值 0 是确定的），此后不再写行。
+
+组合层（总市值/总成本/累计盈亏）**不建表**，按 `trade_date` 聚合本表即得。收益口径见 `docs/API.md` §6。
 
 ### `ai_recap`
 

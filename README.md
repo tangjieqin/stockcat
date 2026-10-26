@@ -24,7 +24,23 @@ mvn spring-boot:run -DskipTests
 cd frontend
 npm install
 npm run dev    # http://localhost:5173
+
+# 4. Python 适配器（只有历史 K 线同步 / P2 Agent 需要，可选）
+cd backend-python
+python -m venv .venv && .venv\Scripts\activate   # Windows；macOS/Linux 用 source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8100
 ```
+
+**两个后端是独立的两个进程，互不依赖启动顺序**：
+
+| 进程 | 端口 | 职责 | 不启动会怎样 |
+|---|---|---|---|
+| `backend-java` | 8081 | 业务权威：行情采集、告警、持仓、复盘、基金 IOPV（腾讯直连） | 前端全部不可用 |
+| `backend-python` | 8100 | 历史行情与基金净值抓取（P1）/ AI Agent（P2） | 实时行情、告警、IOPV、持仓**照常**；只有历史 K 线与净值同步返回 `DATA_SOURCE_UNAVAILABLE`（净值缺失时 LOF 溢价不显示，ETF 溢价仍可用 IOPV） |
+
+Java 在两个场景通过 `http://127.0.0.1:8100/internal/v1/*` 调 Python：同步历史 K 线（`/kline`）与同步基金净值（`/fund-nav`），
+配置项 `stockcat.history-source.base-url`。不想再开一个终端时，可以先只跑 Java + 前端做 P0 的全部功能，需要看 K 线图或 LOF 净值溢价时再起 Python。
 
 环境变量（均可用默认值）：`STOCKCAT_DB_HOST/PORT/NAME/USER/PASSWORD`，见 `.env.example`。通知推送：在 `.env` 中配置 `stockcat.notify.serverchan.send-key=<你的SendKey>`（sct.ftqq.com 免费申请，推送到微信「方糖」服务号），在「设置-通知」页可查看渠道状态并发送测试通知。
 
@@ -44,16 +60,36 @@ npm run dev    # http://localhost:5173
 - `eastmoney-push2`（东方财富 push2 批量接口）：P0 已验证可用，仅支持沪深 A 股代码（6/5/9 沪、0/1/2/3 深）；北交所暂不支持。
 - 过期判定：行情时间距今超过 `stockcat.quote.stale-after-minutes`（默认 30 分钟）标记 `STALE`；缺失字段一律 null，不按 0 显示。
 
+## 历史数据（P1）
+
+日 K 由 Python 抓取、Java 校验并落库（抓取在 Python，业务判定在 Java）。
+
+- **自动同步**：交易日 15:35（`stockcat.history.sync.cron`）同步「自选 ∪ 启用中的监控标的 ∪ 当前持仓」最近 120 根日 K。
+- **手动补跑**：`POST /api/v1/history/sync?days=250`（全部范围）或 `POST /api/v1/instruments/{id}/history/sync?days=250`。
+- **写入规则**：`UNIQUE(instrument_id, trade_date, adjust)` + UPSERT，可反复跑；前复权历史值会随除权整体移动，因此必须覆盖写。
+- **拒写规则**（避免"看着有数、其实是错的"）：
+  - 当日 K 线未收盘（15:05 前）——上游盘中会返回半根 K 线；
+  - 价格非正——前复权长窗口会把早期价格算成负数（实测茅台 2001-08-27 为 -312.68）；
+  - 单次上限 500 根，默认 120 根（覆盖 MACD 预热需求）。
+- **失败隔离**：Python 未启动/上游超时只记一条 `FAILED` + `DATA_SOURCE_UNAVAILABLE`，不影响实时采集与告警；
+  上游"HTTP 成功但 0 条"也记为失败（`NO_DATA`），不会伪装成同步成功。
+- **技术指标**：`GET /api/v1/instruments/{id}/indicators?adjust=qfq&limit=250`，返回 MACD(12,26,9)、RSI(6/12/24)、KDJ(9,3,3)。
+  指标**不落库**、按查询现算；口径与通达信一致（RSI 用 SMA(X,N,1)、KDJ 的 K/D 用 SMA 递推、MACD 柱 ×2），
+  因此没有引入 ta4j —— 实测它的 RSI6 与看盘软件差 13 个点。预热不足的字段返回 `null` 而不是 0。
+
 ## 排障（FAQ）
 
 | 现象 | 排查 |
 |---|---|
 | Java 启动报连接数据库失败 | 确认 `docker compose up -d` 已跑、容器 healthy（`docker ps`） |
 | Flyway 校验失败 | 不要修改已应用的迁移文件；新变更新增 `Vn__xxx.sql` |
-| 前端请求 404/代理失败 | 确认 Java 已启动（8080）；Vite 代理 `/api → 8080` 见 `vite.config.ts` |
+| 前端请求 404/代理失败 | 确认 Java 已启动（8081）；Vite 代理 `/api → 8081` 见 `vite.config.ts`，可用环境变量 `STOCKCAT_API_TARGET` 指到其他端口（如另起的 8082 验证实例） |
 | 页面价格显示 `—` | 行情缺失或过期（不按 0 显示）；点「刷新行情」或等调度器（交易时段 09:25-11:35/12:55-15:10） |
 | 数据显示「数据过期」 | 行情时间距今超过 `stockcat.quote.stale-after-minutes`（默认 30 分钟），周末/节假日属正常 |
 | 告警没触发 | 规则需启用；仅交易时段评估；仅 VALID 行情触发；检查是否在冷却期（默认 30 分钟） |
+| 指标规则（MACD/KDJ/RSI）没提醒 | 指标规则只在收盘后 15:40 按日线评估，且是"穿越"语义——已在金叉状态不会补发；当天已提醒过会被去重；K 线不够也不会触发。执行 `POST /api/v1/alert-rules/indicator/evaluate` 可看到每条规则的具体状态 |
+| 收益曲线是空的 | 快照每天 15:45 生成，也可点「重建快照」；重建会先补齐**不复权**日线，所以需要 Python（8100）在线，否则该标的市值留空、页面提示"缺收盘价" |
+| 溢价规则建不了 | `PREMIUM_*` 只对 ETF/LOF 开放（股票没有 IOPV/单位净值）；LOF 的净值超过 3 天未更新时也不会判定，避免拿过期净值当实时溢价 |
 | 卖出被拒 409 | 卖出数量超过当时持有量，message 里有当前可卖数量 |
 | 删除交易流水 409 | 删除该买入会使其后的卖出在重放时超卖，属数据保护 |
 | IDEA 运行报 `sqlSessionFactory or sqlSessionTemplate required` | 运行配置里不要额外设置 `--spring.profiles.active=default`；P0.2 起数据库是硬依赖，默认 profile 已是 local（连接 PostgreSQL） |
@@ -69,4 +105,12 @@ npm run dev    # http://localhost:5173
 - ✅ P0.7 交易流水与持仓（重放计算 + 超卖校验）
 - ✅ P0.8 复盘与我的日记（分区复盘 + 树状笔记本）
 - ✅ P0.9 首页总览与集成验收（dashboard 聚合 + 告警总览 + 全链路演示）
+- ✅ P1.0 数据源实测（前复权负价、`lmt` 失效、盘中半根 K 线、`rc=0` 假成功、LOF 无实时 IOPV）
+- ✅ P1.1 Python 历史适配器（`GET /internal/v1/kline` + 27 个 pytest）
+- ✅ P1.2 Java 历史落库与同步（`kline_daily` + 收盘后同步 + 查询/同步 API + 42 个单测）
+- ✅ P1.3 技术指标（MACD/RSI/KDJ，口径对齐通达信；`GET /instruments/{id}/indicators`，现算不落库 + 63 个单测）
+- ✅ P1.6 指标类告警（MACD/KDJ 穿越 + RSI 穿越阈值；收盘后 15:40 评估、按交易日去重 + 81 个单测）
+- ✅ P1.7 标的详情页 K 线图（ECharts 多 pane：K 线/成交量/MACD/RSI/KDJ；未同步、数据不足、数据源不可用全状态；+ 83 个 Java 单测）
+- ✅ P1.4 基金净值/IOPV 与溢价（腾讯 IOPV 实时 + 天天基金净值带日期；溢价查询层现算并标注基准与滞后天数；自选溢价列 + 详情基金区块；+ 108 个 Java 单测、44 个 pytest）
+- ✅ P1.5 收益曲线与持仓变化 + 溢价告警（每日持仓快照由流水重放 + 不复权收盘价生成、可整段重建；`/portfolio/*` 三个接口；持仓页三页签；`PREMIUM_ABOVE/BELOW` 盘中评估、仅 ETF/LOF；+ 129 个 Java 单测）
 

@@ -12,7 +12,7 @@ import {
   updateMonitorTargetEnabled,
   type MonitorTarget,
 } from '../api/instrument'
-import { autoRuleName, cooldownToSeconds, createAlertRule, RULE_TYPES, type CooldownUnit } from '../api/alert'
+import { autoRuleName, buildParams, cooldownToSeconds, createAlertRule, RULE_TYPES, type CooldownUnit } from '../api/alert'
 import { ApiError } from '../api/client'
 import { changeColor } from '../api/quote'
 import { listPositions } from '../api/trade'
@@ -72,11 +72,12 @@ async function submitAdd() {
     // 2. 同步创建告警规则（自动命名，失败不影响已添加的监控）
     if (form.value.withRule) {
       try {
+        const ruleParams = buildParams(form.value.ruleType, { threshold: form.value.threshold })
         await createAlertRule({
-          name: autoRuleName(created.instrument.name, form.value.ruleType, Number(form.value.threshold)),
+          name: autoRuleName(created.instrument.name, form.value.ruleType, ruleParams),
           instrumentId: created.instrument.id,
           ruleType: form.value.ruleType,
-          params: { threshold: Number(form.value.threshold) },
+          params: ruleParams,
           cooldownSeconds: cooldownToSeconds(Number(form.value.cooldownValue) || 0, form.value.cooldownUnit),
         })
       } catch (e) {
