@@ -9,9 +9,9 @@ interface NavItem {
 /**
  * 主布局：左侧导航（对应 docs/UI.md 五组导航）+ 右侧内容区。
  */
-const navGroups: Array<{ label: string; items: NavItem[] }> = [
+const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   {
-    label: '首页',
+    // 首页作为独立入口，不设分组标题（避免「首页/首页」重复）
     items: [{ label: '首页', to: '/', exact: true }],
   },
   {
@@ -57,7 +57,7 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
     <aside class="sidebar">
       <div class="brand">StockCat 🐱</div>
       <nav v-for="group in navGroups" :key="group.label" class="nav-group">
-        <div class="nav-group-label">{{ group.label }}</div>
+        <div v-if="group.label" class="nav-group-label">{{ group.label }}</div>
         <RouterLink
           v-for="item in group.items"
           :key="item.to"
