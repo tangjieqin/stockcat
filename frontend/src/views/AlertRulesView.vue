@@ -194,6 +194,7 @@ onMounted(load)
             </option>
           </select>
         </div>
+        <p class="hint inline-hint">标的选择范围 = 「监控标的」页已添加的标的（只有它们会被采集行情）；要监控其他标的请先去「监控标的」页添加。</p>
         <div class="form-row">
           <label>类型</label>
           <select v-model="form.ruleType">
@@ -397,6 +398,9 @@ onMounted(load)
 .hint {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+.hint.inline-hint {
+  margin: -6px 0 10px 58px;
 }
 .modal-foot {
   display: flex;
