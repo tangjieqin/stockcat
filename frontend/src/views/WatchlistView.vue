@@ -1,0 +1,387 @@
+<script setup lang="ts">
+/**
+ * 自选列表页（行情总览）。
+ * 对应 docs/UI.md「我的股票-自选列表」与 docs/API.md §2/§3。
+ * 无快照显示 —（不按 0）；STALE 标注行情时间；来源与采集时间可见。
+ */
+import { onMounted, ref } from 'vue'
+import {
+  addWatchlist,
+  changeColor,
+  deleteWatchlistItem,
+  listWatchlist,
+  refreshQuotes,
+  type RefreshSummary,
+  type WatchlistItem,
+} from '../api/quote'
+import { ApiError } from '../api/client'
+
+const items = ref<WatchlistItem[]>([])
+const loading = ref(false)
+const errorMsg = ref('')
+const refreshing = ref(false)
+const refreshSummary = ref<RefreshSummary | null>(null)
+
+const showAdd = ref(false)
+const form = ref({ market: 'CN_A', symbol: '', type: 'STOCK', name: '' })
+const addError = ref('')
+const submitting = ref(false)
+
+async function load() {
+  loading.value = true
+  errorMsg.value = ''
+  try {
+    items.value = await listWatchlist()
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function refreshAll() {
+  if (!items.value.length) return
+  refreshing.value = true
+  refreshSummary.value = null
+  try {
+    refreshSummary.value = await refreshQuotes(items.value.map((i) => i.instrument.id))
+    await load()
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    refreshing.value = false
+  }
+}
+
+async function submitAdd() {
+  addError.value = ''
+  if (!form.value.symbol.trim()) {
+    addError.value = '请输入标的代码'
+    return
+  }
+  submitting.value = true
+  try {
+    await addWatchlist({
+      market: form.value.market,
+      symbol: form.value.symbol.trim(),
+      type: form.value.type,
+      name: form.value.name.trim() || undefined,
+    })
+    showAdd.value = false
+    form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '' }
+    await load()
+  } catch (e) {
+    addError.value = e instanceof ApiError ? e.message : '添加失败，请重试'
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function remove(item: WatchlistItem) {
+  if (!confirm(`确定从自选移除「${item.instrument.symbol} ${item.instrument.name}」吗？\n（只移除自选关系，不删除标的主数据和历史行情）`)) {
+    return
+  }
+  try {
+    await deleteWatchlistItem(item.instrument.id)
+    await load()
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+function fmtTime(iso: string | null): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+}
+
+function statusBadge(status: string | undefined): { text: string; cls: string } {
+  switch (status) {
+    case 'VALID':
+      return { text: '有效', cls: 'ok' }
+    case 'STALE':
+      return { text: '数据过期', cls: 'stale' }
+    case 'PARTIAL':
+      return { text: '部分缺失', cls: 'stale' }
+    case 'INVALID':
+      return { text: '无效', cls: 'bad' }
+    default:
+      return { text: '—', cls: 'off' }
+  }
+}
+
+onMounted(load)
+</script>
+
+<template>
+  <div>
+    <div class="page-head">
+      <div>
+        <h1>自选列表</h1>
+        <p class="sub">关注标的的行情总览；行情来自 eastmoney-push2，过期数据显示标注而非 0。</p>
+      </div>
+      <div class="actions">
+        <button class="btn" :disabled="refreshing || !items.length" @click="refreshAll">
+          {{ refreshing ? '刷新中…' : '⟳ 刷新行情' }}
+        </button>
+        <button class="btn primary" @click="showAdd = true">＋ 添加自选</button>
+      </div>
+    </div>
+
+    <div v-if="refreshSummary" class="banner ok">
+      刷新完成：{{ refreshSummary.succeeded }} 成功 / {{ refreshSummary.failed }} 失败（共 {{ refreshSummary.requested }}）
+    </div>
+    <div v-if="errorMsg" class="banner error">{{ errorMsg }}</div>
+
+    <table v-if="items.length" class="table">
+      <thead>
+        <tr>
+          <th>代码</th>
+          <th>名称</th>
+          <th>最新价</th>
+          <th>涨跌幅</th>
+          <th>昨收</th>
+          <th>行情时间</th>
+          <th>状态</th>
+          <th style="width: 90px">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="it in items" :key="it.id">
+          <td class="mono">{{ it.instrument.symbol }}</td>
+          <td>
+            {{ it.instrument.name }}
+            <span class="type-tag">{{ it.instrument.type }}</span>
+          </td>
+          <td class="mono">{{ it.quote?.lastPrice ?? '—' }}</td>
+          <td class="mono" :style="{ color: changeColor(it.quote?.changePercent) }">
+            {{ it.quote?.changePercent != null ? it.quote.changePercent + '%' : '—' }}
+          </td>
+          <td class="mono">{{ it.quote?.previousClose ?? '—' }}</td>
+          <td class="muted">{{ fmtTime(it.quote?.marketTime ?? null) }}</td>
+          <td>
+            <span v-if="it.quote" class="badge" :class="statusBadge(it.quote.dataStatus).cls">
+              {{ statusBadge(it.quote.dataStatus).text }}
+            </span>
+            <span v-else class="badge off">—</span>
+            <div v-if="it.quote" class="src">采集 {{ fmtTime(it.quote.collectedAt) }}</div>
+          </td>
+          <td>
+            <button class="btn small danger" @click="remove(it)">移除</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div v-else-if="!loading" class="empty">暂无自选标的，点击右上角「添加自选」开始</div>
+    <div v-else>加载中…</div>
+
+    <!-- 添加弹窗 -->
+    <div v-if="showAdd" class="modal-mask" @click.self="showAdd = false">
+      <div class="modal">
+        <h2>添加自选标的</h2>
+        <div class="form-row">
+          <label>市场</label>
+          <select v-model="form.market">
+            <option value="CN_A">CN_A（A股）</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>类型</label>
+          <select v-model="form.type">
+            <option value="STOCK">股票 STOCK</option>
+            <option value="ETF">ETF</option>
+            <option value="LOF">LOF</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>代码</label>
+          <input v-model="form.symbol" placeholder="如 600519 / 510300 / 000001" />
+        </div>
+        <div class="form-row">
+          <label>名称</label>
+          <input v-model="form.name" placeholder="可选，通常自动从行情源补全" />
+        </div>
+        <p class="hint">名称将由行情源自动补全并验证；无法验证且未填名称时不会创建。</p>
+        <div v-if="addError" class="banner error">{{ addError }}</div>
+        <div class="modal-foot">
+          <button class="btn" @click="showAdd = false">取消</button>
+          <button class="btn primary" :disabled="submitting" @click="submitAdd">
+            {{ submitting ? '提交中…' : '添加' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+}
+.sub {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  margin: -4px 0 0;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.table th {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.mono {
+  font-family: Consolas, monospace;
+}
+.muted {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.type-tag {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+.src {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+.badge {
+  font-size: 12px;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.badge.ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+.badge.stale {
+  background: #fffbeb;
+  color: #b45309;
+}
+.badge.bad {
+  background: #fdf2f2;
+  color: #b91c1c;
+}
+.badge.off {
+  background: var(--bg-hover);
+  color: var(--text-tertiary);
+}
+.empty {
+  color: var(--text-tertiary);
+  padding: 48px 0;
+  text-align: center;
+}
+.banner.ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.banner.error {
+  background: #fdf2f2;
+  color: #b91c1c;
+  border: 1px solid #f8b4b4;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.btn {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.btn:hover {
+  background: var(--bg-hover);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn.small {
+  padding: 3px 8px;
+}
+.btn.danger {
+  color: #b91c1c;
+}
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  width: 400px;
+  background: var(--bg-panel);
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+.modal h2 {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.form-row label {
+  width: 48px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.form-row input,
+.form-row select {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+</style>

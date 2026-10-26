@@ -1,0 +1,32 @@
+/* StockCat 全局样式（桌面优先，浅色主题，见 docs/UI.md） */
+:root {
+  --bg: #f7f8fa;
+  --bg-panel: #ffffff;
+  --bg-hover: #f0f1f4;
+  --border: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-tertiary: #9ca3af;
+  --accent: #2563eb;
+  --accent-soft: #eff6ff;
+  /* A 股约定：红涨绿跌 */
+  --up: #dc2626;
+  --down: #16a34a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0 0 16px;
+}

@@ -1,0 +1,14 @@
+# local profile（默认）：连接本地 PostgreSQL（Docker Compose 或本机安装均可）
+spring:
+  config:
+    # 引入项目根目录 .env（含 Server酱 SendKey 与数据库口令，不提交 git）。
+    # 两个路径兼容：从仓库根目录启动用 ./，从 backend-java 目录启动用 ../
+    import: "optional:file:.env[.properties],optional:file:../.env[.properties]"
+  datasource:
+    url: jdbc:postgresql://${STOCKCAT_DB_HOST:localhost}:${STOCKCAT_DB_PORT:5432}/${STOCKCAT_DB_NAME:stockcat}
+    username: ${STOCKCAT_DB_USER:stockcat}
+    password: ${STOCKCAT_DB_PASSWORD:stockcat}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true

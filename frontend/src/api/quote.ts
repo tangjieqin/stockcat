@@ -1,0 +1,70 @@
+import { http } from './client'
+import type { Instrument } from './instrument'
+
+/** 最新快照（对应 docs/API.md §2 quote 结构；缺失字段为 null，不按 0） */
+export interface Quote {
+  lastPrice: number | null
+  previousClose: number | null
+  changePercent: number | null
+  volume: number | null
+  turnover: number | null
+  marketTime: string | null
+  collectedAt: string | null
+  dataStatus: 'VALID' | 'STALE' | 'PARTIAL' | 'INVALID'
+  source: string
+}
+
+export interface WatchlistItem {
+  id: number
+  instrument: Instrument
+  createdAt: string | null
+  quote: Quote | null
+}
+
+export interface RefreshSummary {
+  requested: number
+  succeeded: number
+  failed: number
+  results: Array<{ instrumentId: number; status: 'SUCCESS' | 'FAILED'; code: string | null }>
+}
+
+/** 内置指数行情（配置驱动，调度器自动采集） */
+export interface IndexQuote {
+  symbol: string
+  name: string
+  lastPrice: number | null
+  changePercent: number | null
+  marketTime: string | null
+  collectedAt: string | null
+  source: string
+}
+
+export async function listWatchlist(): Promise<WatchlistItem[]> {
+  const resp = await http.get<WatchlistItem[]>('/watchlist')
+  return resp.data
+}
+
+export async function addWatchlist(req: { market: string; symbol: string; type: string; name?: string }): Promise<WatchlistItem> {
+  const resp = await http.post<WatchlistItem>('/watchlist', req)
+  return resp.data
+}
+
+export async function deleteWatchlistItem(instrumentId: number): Promise<void> {
+  await http.delete(`/watchlist/${instrumentId}`)
+}
+
+export async function refreshQuotes(instrumentIds: number[]): Promise<RefreshSummary> {
+  const resp = await http.post<RefreshSummary>('/quotes/refresh', { instrumentIds })
+  return resp.data
+}
+
+export async function listIndices(): Promise<IndexQuote[]> {
+  const resp = await http.get<IndexQuote[]>('/indices')
+  return resp.data
+}
+
+/** 涨跌幅颜色：A 股红涨绿跌 */
+export function changeColor(changePercent: number | null | undefined): string {
+  if (changePercent == null) return 'var(--text-primary)'
+  return changePercent > 0 ? 'var(--up)' : changePercent < 0 ? 'var(--down)' : 'var(--text-primary)'
+}

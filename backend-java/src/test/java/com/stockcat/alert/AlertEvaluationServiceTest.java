@@ -1,0 +1,158 @@
+package com.stockcat.alert;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stockcat.common.ApiException;
+import com.stockcat.domain.AlertEvent;
+import com.stockcat.domain.AlertRule;
+import com.stockcat.domain.QuoteSnapshot;
+import com.stockcat.mapper.AlertEventMapper;
+import com.stockcat.mapper.AlertRuleMapper;
+import com.stockcat.service.AlertEvaluationService;
+import com.stockcat.web.dto.QuoteResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import java.time.OffsetDateTime;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+
+/**
+ * P0.5 验收单元测试：四种条件覆盖、边界含值、过期/无效行情不触发、冷却生效。
+ */
+class AlertEvaluationServiceTest {
+
+    private AlertEventMapper eventMapper;
+    private AlertRuleMapper ruleMapper;
+    private AlertEvaluationService service;
+    private final ObjectMapper om = new ObjectMapper();
+
+    private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-10-26T10:00:00+08:00");
+
+    @BeforeEach
+    void setup() {
+        eventMapper = Mockito.mock(AlertEventMapper.class);
+        ruleMapper = Mockito.mock(AlertRuleMapper.class);
+        AlertEvaluatorStubs stubs = new AlertEvaluatorStubs();
+        when(eventMapper.insert(any())).thenReturn(1);
+        service = new AlertEvaluationService(stubs.registry(), ruleMapper, eventMapper, om,
+                Mockito.mock(com.stockcat.service.NotificationService.class));
+    }
+
+    /** 简单注册表容器 */
+    static class AlertEvaluatorStubs {
+        RuleEvaluatorRegistry registry() {
+            return new RuleEvaluatorRegistry(java.util.List.of(
+                    new PriceAboveEvaluator(), new PriceBelowEvaluator(),
+                    new ChangePercentAboveEvaluator(), new ChangePercentBelowEvaluator()));
+        }
+    }
+
+    private static AlertRule rule(String type, String params, Integer cooldown, OffsetDateTime lastTriggered) {
+        AlertRule r = new AlertRule();
+        r.setId(1L);
+        r.setName("测试规则");
+        r.setInstrumentId(100L);
+        r.setRuleType(type);
+        r.setParamsJson(params);
+        r.setCooldownMinutes(cooldown);
+        r.setEnabled(true);
+        r.setLastTriggeredAt(lastTriggered);
+        r.setSymbol("600519");
+        return r;
+    }
+
+    private static QuoteResponse quote(Double lastPrice, Double changePercent, String status) {
+        return new QuoteResponse(lastPrice, null, changePercent, null, null,
+                NOW.minusMinutes(1), NOW, status, "test");
+    }
+
+    // ---- 四种条件 ----
+
+    @Test
+    void priceAboveTriggers() {
+        Optional<AlertEvent> e = service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":12.5}", 30, null),
+                quote(12.60, 1.0, "VALID"), NOW);
+        assertThat(e).isPresent();
+        assertThat(e.get().getObservedPrice()).isEqualTo(12.60);
+        assertThat(e.get().getRuleTypeSnapshot()).isEqualTo("PRICE_ABOVE");
+        assertThat(e.get().getConditionParamsSnapshot()).isEqualTo("{\"threshold\":12.5}");
+    }
+
+    @Test
+    void priceBelowTriggers() {
+        assertThat(service.evaluate(rule("PRICE_BELOW", "{\"threshold\":10}", 30, null),
+                quote(9.99, -0.5, "VALID"), NOW)).isPresent();
+    }
+
+    @Test
+    void changePercentAboveTriggers() {
+        assertThat(service.evaluate(rule("CHANGE_PERCENT_ABOVE", "{\"threshold\":5}", 30, null),
+                quote(105.0, 5.2, "VALID"), NOW)).isPresent();
+    }
+
+    @Test
+    void changePercentBelowTriggers() {
+        // 跌破 20%：-20 为阈值，-20.5 触发
+        assertThat(service.evaluate(rule("CHANGE_PERCENT_BELOW", "{\"threshold\":-20}", 30, null),
+                quote(79.5, -20.5, "VALID"), NOW)).isPresent();
+    }
+
+    // ---- 边界含值 ----
+
+    @Test
+    void boundaryInclusive() {
+        assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":12.5}", 30, null),
+                quote(12.5, 0.0, "VALID"), NOW)).isPresent();
+        assertThat(service.evaluate(rule("CHANGE_PERCENT_BELOW", "{\"threshold\":-20}", 30, null),
+                quote(80.0, -20.0, "VALID"), NOW)).isPresent();
+        assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":12.5}", 30, null),
+                quote(12.49, 0.0, "VALID"), NOW)).isEmpty();
+    }
+
+    // ---- 过期/无效/缺失行情不触发 ----
+
+    @Test
+    void staleQuoteDoesNotTrigger() {
+        assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":1}", 30, null),
+                quote(99.0, 0.0, "STALE"), NOW)).isEmpty();
+        assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":1}", 30, null),
+                quote(99.0, 0.0, "INVALID"), NOW)).isEmpty();
+        assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":1}", 30, null),
+                quote(null, null, "VALID"), NOW)).isEmpty();
+        assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":1}", 30, null),
+                null, NOW)).isEmpty();
+    }
+
+    // ---- 冷却 ----
+
+    @Test
+    void cooldownSuppressesRepeatTrigger() {
+        AlertRule r = rule("PRICE_ABOVE", "{\"threshold\":12.5}", 30, NOW.minusMinutes(10));
+        assertThat(service.evaluate(r, quote(12.6, 1.0, "VALID"), NOW)).isEmpty();
+
+        // 冷却期已过 -> 可再次触发
+        AlertRule r2 = rule("PRICE_ABOVE", "{\"threshold\":12.5}", 30, NOW.minusMinutes(31));
+        assertThat(service.evaluate(r2, quote(12.6, 1.0, "VALID"), NOW)).isPresent();
+    }
+
+    @Test
+    void zeroCooldownAllowsImmediateRetrigger() {
+        assertThat(service.evaluate(rule("PRICE_ABOVE", "{\"threshold\":12.5}", 0, NOW.minusSeconds(5)),
+                quote(12.6, 1.0, "VALID"), NOW)).isPresent();
+    }
+
+    // ---- 参数校验 ----
+
+    @Test
+    void evaluatorRejectsBadParams() {
+        AbstractPriceEvaluator evaluator = new PriceAboveEvaluator();
+        assertThatThrownBy(() -> evaluator.validateParams(om.valueToTree(java.util.Map.of())))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("threshold");
+    }
+}

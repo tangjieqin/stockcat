@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: stockcat-server
+  # P0.2 起数据库是硬依赖（MyBatis Mapper 需要 SqlSessionFactory），
+  # 默认激活 local profile（PostgreSQL + Flyway + .env）。
+  # 需要覆盖时用启动参数：--spring.profiles.active=xxx
+  profiles:
+    active: local
+
+server:
+  port: 8081
+
+mybatis:
+  # Mapper XML 位置（P0.2 起补充）
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.stockcat: DEBUG

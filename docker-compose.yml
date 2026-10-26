@@ -1,0 +1,24 @@
+# StockCat 本地开发环境：仅 PostgreSQL 一个服务（P0 约定）
+# 使用: docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stockcat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${STOCKCAT_DB_NAME:-stockcat}
+      POSTGRES_USER: ${STOCKCAT_DB_USER:-stockcat}
+      POSTGRES_PASSWORD: ${STOCKCAT_DB_PASSWORD:-stockcat}
+      TZ: Asia/Shanghai
+    ports:
+      - "${STOCKCAT_DB_PORT:-5432}:5432"
+    volumes:
+      - stockcat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STOCKCAT_DB_USER:-stockcat} -d ${STOCKCAT_DB_NAME:-stockcat}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  stockcat_pgdata:

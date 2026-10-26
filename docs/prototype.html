@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StockCat 前端原型（模拟数据）</title>
+<style>
+  :root{
+    --ink:#1f2430; --muted:#6b7280; --line:#e4e7ec; --bg:#f5f6f8; --card:#fff;
+    --primary:#2563eb; --primary-weak:#eaf1fe;
+    --up:#d92d20; --up-bg:#feeceb;      /* A股惯例：红涨 */
+    --down:#087f5b; --down-bg:#e6f4f1;  /* 绿跌 */
+    --ok:#12805c; --warn:#b54708; --warn-bg:#fef3e2; --err:#b42318; --err-bg:#feeceb;
+    --gray-dot:#98a2b3;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6;}
+  .num{font-family:Consolas,Menlo,monospace;font-variant-numeric:tabular-nums;}
+
+  .proto-banner{background:#1f2430;color:#fcd34d;text-align:center;padding:6px 0;font-size:12px;letter-spacing:2px;}
+  .proto-banner b{color:#fff;}
+
+  .layout{display:flex;min-height:calc(100vh - 30px);}
+  aside{width:208px;background:#fff;border-right:1px solid var(--line);padding:16px 12px;flex-shrink:0;overflow-y:auto;}
+  .logo{font-size:18px;font-weight:700;padding:0 12px 14px;}
+  .logo span{color:var(--primary);}
+  .nav-group{font-size:11px;color:#a2a8b3;padding:12px 12px 4px;letter-spacing:1px;}
+  .nav-item{display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;border-radius:8px;
+    font-size:13px;color:var(--muted);cursor:pointer;margin-bottom:2px;}
+  .nav-item:hover{background:var(--bg);color:var(--ink);}
+  .nav-item.active{background:var(--primary-weak);color:var(--primary);font-weight:600;}
+  .nav-item.disabled{opacity:.4;cursor:not-allowed;}
+  .nav-note{margin:16px 12px 0;font-size:11px;color:#a2a8b3;border-top:1px dashed var(--line);padding-top:10px;}
+
+  main{flex:1;padding:22px 28px;max-width:1220px;}
+  .page{display:none;}
+  .page.active{display:block;}
+  .page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  h1{font-size:20px;font-weight:600;}
+  .refresh-info{color:var(--muted);font-size:13px;margin-right:12px;}
+
+  .btn{border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;}
+  .btn-primary{background:var(--primary);color:#fff;}
+  .btn-primary:hover{background:#1d4fd7;}
+  .btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink);}
+  .btn-danger{background:#fff;border:1px solid #f1a8a2;color:var(--err);}
+  .btn-danger:hover{background:var(--err-bg);}
+  .btn-sm{padding:4px 10px;font-size:12px;border-radius:6px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .link{color:var(--primary);cursor:pointer;text-decoration:none;font-size:13px;}
+  .link.danger{color:var(--err);}
+
+  /* 仪表盘卡片 */
+  .dash-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;}
+  .dash-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;cursor:pointer;}
+  .dash-card:hover{border-color:var(--primary);}
+  .dash-card h3{font-size:13px;color:var(--muted);font-weight:500;margin-bottom:6px;}
+  .dash-card .big{font-size:22px;font-weight:600;}
+  .dash-card .sub{font-size:12px;color:var(--muted);margin-top:2px;}
+
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px;}
+  th{background:#f7f8fa;text-align:left;font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;color:#475467;}
+  td{padding:9px 12px;border-bottom:1px solid #f0f1f3;white-space:nowrap;vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  tr:hover td{background:#fafbfc;}
+  .table-title{font-size:14px;font-weight:600;margin:18px 0 8px;}
+
+  .badge{display:inline-flex;align-items:center;gap:5px;border-radius:12px;padding:1px 10px;font-size:12px;white-space:nowrap;}
+  .dot{width:7px;height:7px;border-radius:50%;display:inline-block;}
+  .badge.valid{background:var(--down-bg);color:var(--ok);} .badge.valid .dot{background:var(--ok);}
+  .badge.stale{background:var(--warn-bg);color:var(--warn);} .badge.stale .dot{background:var(--warn);}
+  .badge.failed{background:var(--err-bg);color:var(--err);} .badge.failed .dot{background:var(--err);}
+  .badge.miss{background:#f2f4f7;color:var(--muted);} .badge.miss .dot{background:var(--gray-dot);}
+
+  .pct-up{color:var(--up);} .pct-down{color:var(--down);}
+  .dash{color:#98a2b3;}
+  .muted{color:var(--muted);font-size:12px;}
+  .tag-buy{color:var(--up);font-weight:600;}
+  .tag-sell{color:var(--down);font-weight:600;}
+
+  .switch{position:relative;display:inline-block;width:34px;height:19px;vertical-align:middle;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider{position:absolute;inset:0;background:#cbd5e1;border-radius:19px;cursor:pointer;transition:.2s;}
+  .slider:before{content:"";position:absolute;width:15px;height:15px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;}
+  .switch input:checked + .slider{background:var(--primary);}
+  .switch input:checked + .slider:before{transform:translateX(15px);}
+
+  .filters{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center;}
+  .filters select,.filters input{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;background:#fff;color:var(--ink);}
+  .filters .label{font-size:13px;color:var(--muted);}
+
+  .sys-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  .sys-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 18px;}
+  .sys-card h3{font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+  .sys-card .row{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:var(--muted);}
+  .sys-card .row b{color:var(--ink);font-weight:500;}
+  .sys-card .err{color:var(--err);font-size:12px;}
+
+  /* 树状笔记本 */
+  .tree .tnode{padding:5px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tree .tnode:hover{background:var(--bg);}
+  .tree .tnode.sub{padding-left:26px;}
+  .tree .tnode.sel{background:var(--primary-weak);color:var(--primary);font-weight:600;}
+
+  .overlay{position:fixed;inset:0;background:rgba(16,24,40,.5);display:none;align-items:flex-start;justify-content:center;padding-top:9vh;z-index:50;}
+  .overlay.open{display:flex;}
+  .modal{background:#fff;border-radius:12px;width:460px;max-width:92vw;padding:22px 24px;box-shadow:0 10px 40px rgba(0,0,0,.18);max-height:80vh;overflow-y:auto;}
+  .modal h2{font-size:16px;margin-bottom:16px;}
+  .modal .field{margin-bottom:12px;}
+  .modal label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px;}
+  .modal input,.modal select,.modal textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:inherit;}
+  .modal textarea{min-height:110px;resize:vertical;}
+  .modal .hint{font-size:12px;color:var(--muted);margin-top:3px;}
+  .modal .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;}
+  .modal .actions .spacer{flex:1;}
+  .confirm-text{font-size:14px;margin-bottom:4px;}
+  .confirm-name{color:var(--err);font-weight:600;}
+  .check-row{display:flex;flex-wrap:wrap;gap:8px;}
+  .check-row .chk{border:1px solid var(--line);border-radius:8px;padding:3px 10px;font-size:12px;cursor:pointer;background:#fff;}
+  .check-row .chk.on{background:var(--primary-weak);border-color:var(--primary);color:var(--primary);}
+</style>
+</head>
+<body>
+
+<div class="proto-banner">⚠ 前端原型 · 页面内所有数据均为<b>模拟数据</b>，仅用于交互与布局评审，不代表真实行情或真实持仓</div>
+
+<div class="layout">
+  <aside>
+    <div class="logo">Stock<span>Cat</span></div>
+    <button class="nav-item active" data-page="dashboard">🏠 首页 · 总览</button>
+
+    <div class="nav-group">告警</div>
+    <button class="nav-item" data-page="alert-overview">📣 告警总览</button>
+    <button class="nav-item" data-page="monitor">🎯 监控标的</button>
+    <button class="nav-item" data-page="rules">🔔 告警规则</button>
+    <button class="nav-item" data-page="history">📋 告警历史</button>
+
+    <div class="nav-group">我的股票</div>
+    <button class="nav-item" data-page="watchlist">⭐ 自选列表</button>
+    <button class="nav-item" data-page="positions">💼 我的持仓</button>
+    <button class="nav-item" data-page="trades">🧾 交易流水</button>
+    <button class="nav-item disabled">📈 持仓变化 (P1)</button>
+
+    <div class="nav-group">复盘</div>
+    <button class="nav-item" data-page="recap">📈 市场复盘</button>
+    <button class="nav-item" data-page="notebook">📓 我的日记</button>
+
+    <div class="nav-group">其他</div>
+    <button class="nav-item" data-page="datasource">🔌 数据源</button>
+    <button class="nav-item" data-page="notify">📨 通知配置</button>
+    <button class="nav-item" data-page="system">🩺 系统状态</button>
+    <button class="nav-item disabled">💾 数据备份 (P4)</button>
+    <button class="nav-item disabled">🤖 AI 配置 (P2)</button>
+
+    <div class="nav-note">原型 V0.2 · 桌面优先 ≥1280px<br>对应 docs/UI.md V1.1-Draft</div>
+  </aside>
+
+  <main>
+
+    <!-- ═══ 1. 首页 · 总览 ═══ -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-head">
+        <h1>首页 · 总览</h1>
+        <span class="refresh-info">2026-10-24 周五 · 15:05</span>
+      </div>
+      <div class="dash-grid">
+        <div class="dash-card" data-page="datasource">
+          <h3>市场概况</h3>
+          <div style="font-size:13px;line-height:1.9;">
+            上证指数 <b class="num">3245.16</b> <span class="num pct-up">+0.42%</span><br>
+            深证成指 <b class="num">10432.7</b> <span class="num pct-down">-0.11%</span><br>
+            创业板指 <b class="num">2118.4</b> <span class="num pct-up">+0.73%</span>
+          </div>
+          <div class="sub">行情时间 15:00:02 · <span class="badge valid" style="padding:0 8px;"><span class="dot"></span>正常</span></div>
+        </div>
+        <div class="dash-card" data-page="positions">
+          <h3>持仓表现</h3>
+          <div class="big num">¥10,250.00</div>
+          <div class="sub">浮动盈亏 <span class="num pct-up">+45.00</span> · 持仓 1 只 · 已实现 <span class="num pct-up">+120.00</span></div>
+        </div>
+        <div class="dash-card" data-page="history">
+          <h3>待处理告警</h3>
+          <div class="big" style="color:var(--warn);">2 条</div>
+          <div class="sub">浦发突破 10.5 · ETF 大跌提醒（未触发）</div>
+        </div>
+        <div class="dash-card" data-page="recap">
+          <h3>复盘入口</h3>
+          <div style="font-weight:600;margin-top:4px;">10-24 复盘：缩量反弹，关注量能</div>
+          <div class="sub">最新市场复盘 · 今日已写</div>
+        </div>
+      </div>
+      <div class="table-title">重点行情（自选/监控标的，按涨跌幅排序）</div>
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th style="text-align:right">最新价</th><th style="text-align:right">涨跌幅</th><th>行情时间</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td class="num">600000</td><td>浦发银行</td><td class="num" style="text-align:right">10.25</td><td class="num pct-up" style="text-align:right">+2.50%</td><td class="num">15:00:01</td><td><span class="badge valid"><span class="dot"></span>正常</span></td></tr>
+          <tr><td class="num">510300</td><td>沪深300ETF</td><td class="num" style="text-align:right">4.12</td><td class="num pct-down" style="text-align:right">-0.24%</td><td class="num">15:00:01</td><td><span class="badge valid"><span class="dot"></span>正常</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ═══ 2. 告警总览 ═══ -->
+    <div class="page" id="page-alert-overview">
+      <div class="page-head"><h1>告警总览</h1></div>
+      <div class="dash-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="dash-card" data-page="rules"><h3>启用规则</h3><div class="big num">2</div><div class="sub">共 3 条，1 条已停用</div></div>
+        <div class="dash-card" data-page="history"><h3>今日事件</h3><div class="big num">1</div><div class="sub">最近触发 14:32</div></div>
+        <div class="dash-card" data-page="notify"><h3>通知渠道</h3><div class="big" style="color:var(--ok);font-size:18px;">邮件正常</div><div class="sub">Server酱 未配置</div></div>
+      </div>
+      <div class="table-title">最近事件</div>
+      <table>
+        <thead><tr><th>触发时间</th><th>标的</th><th>规则</th><th style="text-align:right">触发值</th><th>通知</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td class="num">10-24 14:32:05</td><td class="num">600000</td><td>浦发突破 10.5</td><td class="num" style="text-align:right">10.52</td><td><span class="badge valid"><span class="dot"></span>邮件已发送</span></td><td><a class="link">详情</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ═══ 3. 监控标的 ═══ -->
+    <div class="page" id="page-monitor">
+      <div class="page-head">
+        <h1>监控标的</h1>
+        <button class="btn btn-primary" onclick="openModal('modalAddTarget')">＋ 添加监控标的</button>
+      </div>
+      <p class="muted" style="margin-bottom:10px;">监控标的决定告警引擎的采集与评估范围，与"自选列表"相互独立。</p>
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th>类型</th><th>监控状态</th><th style="text-align:right">最新价</th><th style="text-align:right">涨跌幅</th><th>行情时间</th><th>数据状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td class="num">600000</td><td>浦发银行</td><td>股票</td>
+            <td><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></td>
+            <td class="num" style="text-align:right">10.25</td><td class="num pct-up" style="text-align:right">+2.50%</td>
+            <td class="num">15:00:01</td><td><span class="badge valid"><span class="dot"></span>正常</span></td>
+            <td><a class="link danger" onclick="openConfirm('移除监控标的','浦发银行 600000')">移除</a></td></tr>
+          <tr><td class="num">510300</td><td>沪深300ETF</td><td>ETF</td>
+            <td><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></td>
+            <td class="num" style="text-align:right">4.12</td><td class="num pct-down" style="text-align:right">-0.24%</td>
+            <td class="num">15:00:01</td><td><span class="badge valid"><span class="dot"></span>正常</span></td>
+            <td><a class="link danger" onclick="openConfirm('移除监控标的','沪深300ETF 510300')">移除</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ═══ 4. 告警规则 ═══ -->
+    <div class="page" id="page-rules">
+      <div class="page-head">
+        <h1>告警规则</h1>
+        <button class="btn btn-primary" onclick="openModal('modalRule')">＋ 新建规则</button>
+      </div>
+      <table>
+        <thead><tr><th>规则名称</th><th>标的</th><th>条件</th><th style="text-align:right">阈值</th><th>冷却</th><th>启用</th><th>最近触发</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>浦发突破 10.5</td><td class="num">600000</td><td>价格高于</td><td class="num" style="text-align:right">10.50</td><td>30 分钟</td>
+            <td><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></td>
+            <td class="num">10-24 14:32</td>
+            <td><a class="link">编辑</a> · <a class="link danger" onclick="openConfirm('删除规则','浦发突破 10.5（历史事件保留快照）')">删除</a></td>
+          </tr>
+          <tr>
+            <td>ETF 大跌提醒</td><td class="num">510300</td><td>涨跌幅低于</td><td class="num" style="text-align:right">-3.00%</td><td>60 分钟</td>
+            <td><label class="switch"><input type="checkbox"><span class="slider"></span></label></td>
+            <td class="muted">从未触发</td>
+            <td><a class="link">编辑</a> · <a class="link danger" onclick="openConfirm('删除规则','ETF 大跌提醒（历史事件保留快照）')">删除</a></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">阈值约定：涨跌幅用百分数值，跌 3% 填 <b>-3</b>；条件判断含边界（≥ / ≤）。停用规则不再产生新事件，历史事件保留。</p>
+    </div>
+
+    <!-- ═══ 5. 告警历史 ═══ -->
+    <div class="page" id="page-history">
+      <div class="page-head"><h1>告警历史</h1></div>
+      <div class="filters">
+        <span class="label">时间</span><input type="date" value="2026-10-24"><span class="label">至</span><input type="date" value="2026-10-24">
+        <span class="label">标的</span><select><option>全部</option><option>600000</option></select>
+        <span class="label">通知状态</span><select><option>全部</option><option>已发送</option><option>失败</option></select>
+        <button class="btn btn-ghost btn-sm">筛选</button>
+      </div>
+      <table>
+        <thead><tr><th>触发时间</th><th>标的</th><th>规则</th><th style="text-align:right">触发值</th><th style="text-align:right">当时涨跌</th><th>行情时间</th><th>通知</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="num">10-24 14:32:05</td><td class="num">600000</td><td>浦发突破 10.5</td>
+            <td class="num" style="text-align:right">10.52</td><td class="num pct-up" style="text-align:right">+2.44%</td><td class="num">14:32:00</td>
+            <td><span class="badge failed"><span class="dot"></span>推送失败</span></td>
+            <td><a class="link" onclick="openModal('modalEvent')">详情</a></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">事件触发 ≠ 通知成功；同一事件可对应多条通知记录（不同渠道）。</p>
+    </div>
+
+    <!-- ═══ 6. 自选列表 ═══ -->
+    <div class="page" id="page-watchlist">
+      <div class="page-head">
+        <h1>自选列表</h1>
+        <button class="btn btn-primary" onclick="openModal('modalAddWatch')">＋ 添加自选</button>
+      </div>
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th>市场/类型</th><th style="text-align:right">最新价</th><th style="text-align:right">涨跌幅</th><th>行情时间</th><th>采集时间</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td class="num">600000</td><td>浦发银行</td><td>A股/股票</td>
+            <td class="num" style="text-align:right">10.25</td><td class="num pct-up" style="text-align:right">+2.50%</td>
+            <td class="num">15:00:01</td><td class="num">15:00:03</td>
+            <td><span class="badge valid"><span class="dot"></span>正常</span></td>
+            <td><a class="link danger" onclick="openConfirm('移除自选','浦发银行 600000')">移除</a></td></tr>
+          <tr><td class="num">501018</td><td>南方原油</td><td>A股/LOF</td>
+            <td class="dash" style="text-align:right">—</td><td class="dash" style="text-align:right">—</td>
+            <td class="dash">—</td><td class="num">15:00:03</td>
+            <td><span class="badge miss"><span class="dot"></span>无快照</span></td>
+            <td><a class="link danger" onclick="openConfirm('移除自选','南方原油 501018')">移除</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ═══ 7. 我的持仓 ═══ -->
+    <div class="page" id="page-positions">
+      <div class="page-head"><h1>我的持仓</h1></div>
+      <div class="dash-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px;">
+        <div class="dash-card"><h3>总市值</h3><div class="big num">¥10,250.00</div></div>
+        <div class="dash-card"><h3>总浮动盈亏</h3><div class="big num pct-up">+45.00</div><div class="sub">基于最新有效快照</div></div>
+        <div class="dash-card"><h3>累计已实现</h3><div class="big num pct-up">+120.00</div><div class="sub">含交易费用</div></div>
+      </div>
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th style="text-align:right">持有数量</th><th style="text-align:right">摊薄成本</th><th style="text-align:right">最新价</th><th style="text-align:right">市值</th><th style="text-align:right">浮动盈亏</th><th style="text-align:right">已实现盈亏</th><th>行情时间</th></tr></thead>
+        <tbody>
+          <tr><td class="num">600000</td><td>浦发银行</td>
+            <td class="num" style="text-align:right">1,000</td><td class="num" style="text-align:right">10.205</td>
+            <td class="num" style="text-align:right">10.25</td><td class="num" style="text-align:right">10,250.00</td>
+            <td class="num pct-up" style="text-align:right">+45.00</td><td class="num pct-up" style="text-align:right">+120.00</td>
+            <td class="num">15:00:01 <span class="badge valid" style="padding:0 8px;"><span class="dot"></span></span></td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">持仓由交易流水计算，非券商同步数据；快照缺失/过期时市值与浮动盈亏显示"—"，不按 0 计算。</p>
+    </div>
+
+    <!-- ═══ 8. 交易流水 ═══ -->
+    <div class="page" id="page-trades">
+      <div class="page-head">
+        <h1>交易流水</h1>
+        <button class="btn btn-primary" onclick="openModal('modalTrade')">＋ 记录交易</button>
+      </div>
+      <div class="filters">
+        <span class="label">标的</span><select><option>全部</option><option>600000</option></select>
+        <span class="label">方向</span><select><option>全部</option><option>买入</option><option>卖出</option></select>
+        <span class="label">时间</span><input type="date" value="2026-10-24"><button class="btn btn-ghost btn-sm">筛选</button>
+      </div>
+      <table>
+        <thead><tr><th>成交时间</th><th>标的</th><th>方向</th><th style="text-align:right">成交价</th><th style="text-align:right">数量</th><th style="text-align:right">费用</th><th style="text-align:right">金额</th><th>备注</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td class="num">10-24 14:30:00</td><td class="num">600000</td><td class="tag-buy">买入</td>
+            <td class="num" style="text-align:right">10.20</td><td class="num" style="text-align:right">1,000</td>
+            <td class="num" style="text-align:right">5.00</td><td class="num" style="text-align:right">10,205.00</td>
+            <td>突破买入</td><td><a class="link danger" onclick="openConfirm('删除交易','10-24 买入 600000 ×1000（持仓将重算）')">删除</a></td></tr>
+          <tr><td class="num">10-21 10:05:00</td><td class="num">600000</td><td class="tag-sell">卖出</td>
+            <td class="num" style="text-align:right">10.32</td><td class="num" style="text-align:right">500</td>
+            <td class="num" style="text-align:right">5.00</td><td class="num" style="text-align:right">5,155.00</td>
+            <td>部分止盈</td><td><a class="link danger" onclick="openConfirm('删除交易','10-21 卖出 600000 ×500（持仓将重算）')">删除</a></td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">交易流水是持仓的唯一事实来源；删除后受影响持仓自动重算。卖出超过持有量会被拒绝（409）。</p>
+    </div>
+
+    <!-- ═══ 9a. 市场复盘 ═══ -->
+    <div class="page" id="page-recap">
+      <div class="page-head">
+        <h1>市场复盘</h1>
+        <button class="btn btn-primary" onclick="openModal('modalRecap')">＋ 写今日复盘</button>
+      </div>
+      <p class="muted" style="margin-bottom:10px;">每个交易日一篇；编辑时分区填写"市场主要情况"与"板块表现"。今日已有复盘。</p>
+      <div class="filters">
+        <span class="label">日期</span><input type="date" value="2026-10-24"><span class="label">至</span><input type="date" value="2026-10-24">
+        <input placeholder="关键词检索" style="width:180px;"><button class="btn btn-ghost btn-sm">检索</button>
+      </div>
+      <table>
+        <thead><tr><th>日期</th><th>标题</th><th>市场概况摘要</th><th>关联告警</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td class="num">2026-10-24</td><td>缩量反弹，关注量能</td><td>三大指数集体收涨，创业板领涨…</td><td class="num">1 条</td>
+            <td><span class="badge valid"><span class="dot"></span>正式</span></td><td class="num">10-24 15:10</td>
+            <td><a class="link" onclick="openModal('modalRecap')">编辑</a> · <a class="link danger" onclick="openConfirm('删除市场复盘','10-24《缩量反弹，关注量能》')">删除</a></td></tr>
+          <tr><td class="num">2026-10-23</td><td>缩量调整，等待方向</td><td>两市缩量，板块轮动加快…</td><td class="dash">—</td>
+            <td><span class="badge valid"><span class="dot"></span>正式</span></td><td class="num">10-23 15:30</td>
+            <td><a class="link" onclick="openModal('modalRecap')">编辑</a> · <a class="link danger" onclick="openConfirm('删除市场复盘','10-23《缩量调整，等待方向》')">删除</a></td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">P2 的 AI 复盘草稿将带"AI 草稿"标识，确认后才转为正式复盘。</p>
+    </div>
+
+    <!-- ═══ 9b. 我的日记（树状笔记本） ═══ -->
+    <div class="page" id="page-notebook">
+      <div class="page-head">
+        <h1>我的日记</h1>
+        <div>
+          <button class="btn btn-ghost" onclick="alert('原型演示：新建文件夹（服务端校验深度≤5、成环）')">＋ 文件夹</button>
+          <button class="btn btn-primary" onclick="alert('原型演示：在当前文件夹新建文档')">＋ 文档</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <!-- 左树 -->
+        <div style="width:260px;flex-shrink:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;">
+          <input placeholder="搜索文档…" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:8px;">
+          <div class="tree">
+            <div class="tnode">📂 <b>交易记录反思</b></div>
+            <div class="tnode sub sel">📄 600000 突破加仓复盘</div>
+            <div class="tnode sub">📄 止损纪律执行情况</div>
+            <div class="tnode">📂 <b>学习方法</b></div>
+            <div class="tnode sub">📄 均线系统笔记</div>
+            <div class="tnode">📄 2026 年度目标</div>
+          </div>
+        </div>
+        <!-- 右文 -->
+        <div style="flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <b style="font-size:15px;">600000 突破加仓复盘</b>
+            <span>
+              <button class="btn btn-ghost btn-sm">重命名</button>
+              <button class="btn btn-ghost btn-sm">移动到…</button>
+              <button class="btn btn-danger btn-sm" onclick="openConfirm('删除文档','《600000 突破加仓复盘》')">删除</button>
+            </span>
+          </div>
+          <div class="muted" style="margin-bottom:8px;">路径：交易记录反思 / · 关联标的：<a class="link">600000 浦发银行</a></div>
+          <textarea style="width:100%;min-height:220px;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;">10-24 盘中突破 10.5 平台后加仓。
+
+决策依据：
+- 放量突破，量比 2.1
+- 板块当日领涨
+
+风险提示：若回落至 10.2 下方止损。</textarea>
+          <div style="text-align:right;margin-top:8px;"><button class="btn btn-primary btn-sm">保存</button></div>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:10px;">树状长期笔记本：文件夹/文档统一为一棵树（深度 ≤5），移动由服务端校验成环；删除文件夹需强确认并显示将删除的文档数。</p>
+    </div>
+
+    <!-- ═══ 10. 数据源 ═══ -->
+    <div class="page" id="page-datasource">
+      <div class="page-head"><h1>数据源</h1></div>
+      <table>
+        <thead><tr><th>数据源</th><th>用途</th><th>状态</th><th>最近成功</th><th>频率配置</th><th>最近错误</th></tr></thead>
+        <tbody>
+          <tr><td>eastmoney-push2</td><td>实时快照</td><td><span class="badge valid"><span class="dot"></span>正常</span></td><td class="num">15:00:03</td><td class="num">5 分钟 / 批量限频</td><td class="dash">—</td></tr>
+          <tr><td>指数快照（内置）</td><td>首页市场概况</td><td><span class="badge valid"><span class="dot"></span>正常</span></td><td class="num">15:00:02</td><td class="num">5 分钟</td><td class="dash">—</td></tr>
+          <tr><td>akshare 日 K（P1）</td><td>历史行情</td><td><span class="badge miss"><span class="dot"></span>未启用</span></td><td class="dash">—</td><td class="dash">—</td><td class="dash">—</td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">数据源必须先验证可用性、字段含义与频率限制；未验证的来源标记"待验证"，不伪造成功。</p>
+    </div>
+
+    <!-- ═══ 11. 通知配置 ═══ -->
+    <div class="page" id="page-notify">
+      <div class="page-head"><h1>通知配置</h1></div>
+      <table>
+        <thead><tr><th>渠道</th><th>状态</th><th>最近发送</th><th>说明</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td>邮件 SMTP</td><td><span class="badge valid"><span class="dot"></span>已配置</span></td><td class="num">14:32 成功</td><td class="muted">密钥通过环境变量注入，不显示明文</td><td><button class="btn btn-ghost btn-sm">发送测试</button></td></tr>
+          <tr><td>Server酱</td><td><span class="badge miss"><span class="dot"></span>未配置</span></td><td class="dash">—</td><td class="muted">验证可用后启用；与 PushPlus 二选一</td><td><button class="btn btn-ghost btn-sm" disabled>发送测试</button></td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:8px;">通知失败不丢失告警事件；仅 FAILED 记录可手动重试。</p>
+    </div>
+
+    <!-- ═══ 12. 系统状态 ═══ -->
+    <div class="page" id="page-system">
+      <div class="page-head"><h1>系统状态</h1><span class="refresh-info">检查时间 15:05:00</span></div>
+      <div class="sys-grid">
+        <div class="sys-card"><h3><span class="dot" style="background:var(--ok)"></span>Java 服务</h3>
+          <div class="row"><span>状态</span><b>UP</b></div><div class="row"><span>版本</span><b class="num">0.1.0-SNAPSHOT</b></div></div>
+        <div class="sys-card"><h3><span class="dot" style="background:var(--ok)"></span>PostgreSQL</h3>
+          <div class="row"><span>连接</span><b>正常</b></div><div class="row"><span>迁移版本</span><b class="num">V1</b></div></div>
+        <div class="sys-card"><h3><span class="dot" style="background:var(--warn)"></span>行情采集器</h3>
+          <div class="row"><span>状态</span><b style="color:var(--warn)">部分降级</b></div>
+          <div class="row"><span>最近成功</span><b class="num">15:00:03</b></div>
+          <div class="err">最近错误：600519 采集超时（14:55，已重试 3 次）</div></div>
+        <div class="sys-card"><h3><span class="dot" style="background:var(--ok)"></span>通知渠道</h3>
+          <div class="row"><span>邮件</span><b>已配置 ✓</b></div><div class="row"><span>Server酱</span><b>未配置</b></div></div>
+        <div class="sys-card"><h3><span class="dot" style="background:var(--gray-dot)"></span>Python 服务</h3>
+          <div class="row"><span>状态</span><b>UNKNOWN（未启动）</b></div>
+          <div class="row"><span>说明</span><b>P0 仅为骨架，故障不影响告警</b></div></div>
+      </div>
+      <p class="muted" style="margin-top:12px;">本页只展示健康状态与错误摘要，不显示密钥、环境变量值或堆栈。</p>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══ 弹窗：添加监控标的 ═══ -->
+<div class="overlay" id="modalAddTarget" onclick="overlayClick(event,this)">
+  <div class="modal">
+    <h2>添加监控标的</h2>
+    <div class="field"><label>市场</label><select><option>A股（沪深）</option></select><div class="hint">P0 仅支持 A 股</div></div>
+    <div class="field"><label>标的代码</label><input placeholder="如 600000"></div>
+    <div class="field"><label>产品类型</label><select><option>股票</option><option>ETF</option><option>LOF</option></select></div>
+    <div class="field"><label>标的名称</label><input placeholder="由服务端主数据自动补全" disabled></div>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-ghost" onclick="closeModal('modalAddTarget')">取消</button><button class="btn btn-primary" onclick="closeModal('modalAddTarget')">添加</button></div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：添加自选 ═══ -->
+<div class="overlay" id="modalAddWatch" onclick="overlayClick(event,this)">
+  <div class="modal">
+    <h2>添加自选</h2>
+    <div class="field"><label>市场</label><select><option>A股（沪深）</option></select></div>
+    <div class="field"><label>标的代码</label><input placeholder="如 600000"></div>
+    <div class="field"><label>产品类型</label><select><option>股票</option><option>ETF</option><option>LOF</option></select></div>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-ghost" onclick="closeModal('modalAddWatch')">取消</button><button class="btn btn-primary" onclick="closeModal('modalAddWatch')">添加</button></div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：新建/编辑规则 ═══ -->
+<div class="overlay" id="modalRule" onclick="overlayClick(event,this)">
+  <div class="modal">
+    <h2>新建告警规则</h2>
+    <div class="field"><label>规则名称</label><input placeholder="如 浦发突破 10.5"></div>
+    <div class="field"><label>标的（取自监控标的）</label><select><option>600000 浦发银行</option><option>510300 沪深300ETF</option></select></div>
+    <div class="field"><label>规则类型（决定参数表单）</label><select onchange="ruleTypeHint(this)"><option>价格高于 PRICE_ABOVE</option><option>价格低于 PRICE_BELOW</option><option>涨跌幅高于 CHANGE_PERCENT_ABOVE</option><option>涨跌幅低于 CHANGE_PERCENT_BELOW</option><option disabled>溢价率高于 PREMIUM_ABOVE（P1，需 IOPV 数据）</option><option disabled>指标交叉 INDICATOR_CROSS（P1）</option></select></div>
+    <div class="field"><label id="paramLabel">阈值</label><input placeholder="价格直接填价格；涨跌幅用百分数值，跌 20% 填 -20"></div>
+    <div class="field"><label>冷却时间（分钟）</label><input value="30"><div class="hint">非负整数；冷却期内同一规则不重复通知</div></div>
+    <div class="field"><label>启用</label><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-ghost" onclick="closeModal('modalRule')">取消</button><button class="btn btn-primary">保存</button></div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：记录交易 ═══ -->
+<div class="overlay" id="modalTrade" onclick="overlayClick(event,this)">
+  <div class="modal">
+    <h2>记录交易</h2>
+    <div class="field"><label>标的</label><select><option>600000 浦发银行</option><option>510300 沪深300ETF</option></select></div>
+    <div class="field"><label>方向</label><select><option>买入 BUY</option><option>卖出 SELL</option></select></div>
+    <div class="field"><label>成交价</label><input placeholder="如 10.20"></div>
+    <div class="field"><label>数量（股）</label><input placeholder="如 1000"><div class="hint">卖出不得超过当前持有量，否则后端拒绝（409）</div></div>
+    <div class="field"><label>费用（佣金/税费合计）</label><input value="0"></div>
+    <div class="field"><label>成交时间</label><input type="datetime-local" value="2026-10-24T14:30"></div>
+    <div class="field"><label>备注（操作理由）</label><input placeholder="可选"></div>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-ghost" onclick="closeModal('modalTrade')">取消</button><button class="btn btn-primary">保存</button></div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：写市场复盘 ═══ -->
+<div class="overlay" id="modalRecap" onclick="overlayClick(event,this)">
+  <div class="modal" style="width:580px;">
+    <h2>写市场复盘（2026-10-24）</h2>
+    <div class="field"><label>标题</label><input value="缩量反弹，关注量能"></div>
+    <div class="field"><label>市场主要情况</label><textarea style="min-height:60px;">三大指数集体收涨，上证 +0.42%，两市成交额较昨日缩量…</textarea></div>
+    <div class="field"><label>板块表现</label><textarea style="min-height:60px;">领涨：半导体、券商；领跌：煤炭、地产…</textarea></div>
+    <div class="field"><label>完整正文（Markdown）</label><textarea>详细复盘内容…</textarea></div>
+    <div class="field"><label>关联告警事件</label><div class="check-row"><span class="chk on">10-24 14:32 浦发突破 10.5</span></div></div>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-ghost" onclick="closeModal('modalRecap')">取消</button><button class="btn btn-primary">保存</button></div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：事件详情 ═══ -->
+<div class="overlay" id="modalEvent" onclick="overlayClick(event,this)">
+  <div class="modal" style="width:520px;">
+    <h2>告警事件详情</h2>
+    <table style="border:none;">
+      <tr><td class="muted" style="border:none;width:110px;">规则快照</td><td style="border:none;">浦发突破 10.5（价格高于 10.50）</td></tr>
+      <tr><td class="muted" style="border:none;">触发时间</td><td style="border:none;" class="num">2026-10-24 14:32:05</td></tr>
+      <tr><td class="muted" style="border:none;">触发时价格</td><td style="border:none;" class="num">10.52（+2.44%）</td></tr>
+      <tr><td class="muted" style="border:none;">行情时间</td><td style="border:none;" class="num">14:32:00 · eastmoney-push2</td></tr>
+    </table>
+    <h2 style="margin-top:14px;font-size:14px;">通知记录</h2>
+    <table style="border:1px solid var(--line);border-radius:8px;">
+      <thead><tr><th>渠道</th><th>状态</th><th>发送时间</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr><td>邮件</td><td><span class="badge valid"><span class="dot"></span>已发送</span></td><td class="num">14:32:07</td><td class="muted">—</td></tr>
+        <tr><td>Server酱</td><td><span class="badge failed"><span class="dot"></span>失败</span></td><td class="num">14:32:09</td><td><button class="btn btn-ghost btn-sm">重试</button></td></tr>
+      </tbody>
+    </table>
+    <p class="muted" style="margin-top:8px;">失败原因：HTTP 503（provider 限流）。仅 FAILED 记录可重试，避免重复发送已成功通知。</p>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-primary" onclick="closeModal('modalEvent')">关闭</button></div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：通用确认 ═══ -->
+<div class="overlay" id="modalConfirm" onclick="overlayClick(event,this)">
+  <div class="modal">
+    <h2 id="confirmTitle">确认操作</h2>
+    <p class="confirm-text">确认 <span class="confirm-name" id="confirmName"></span> ？</p>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-ghost" onclick="closeModal('modalConfirm')">取消</button><button class="btn btn-danger" onclick="closeModal('modalConfirm')">确认</button></div>
+  </div>
+</div>
+
+<script>
+  // 导航（含首页卡片跳转）
+  function activate(pageId){
+    document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+    const nav=document.querySelector('.nav-item[data-page="'+pageId+'"]');
+    if(nav)nav.classList.add('active');
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    const target=document.getElementById('page-'+pageId);
+    if(target)target.classList.add('active');
+    window.scrollTo(0,0);
+  }
+  document.querySelectorAll('[data-page]').forEach(el=>{
+    el.addEventListener('click',()=>{ if(!el.classList.contains('disabled')) activate(el.dataset.page); });
+  });
+
+  // 弹窗
+  function openModal(id){document.getElementById(id).classList.add('open');}
+  function closeModal(id){document.getElementById(id).classList.remove('open');}
+  function overlayClick(e,el){if(e.target===el)el.classList.remove('open');}
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
+
+  // 通用确认
+  function openConfirm(title,name){
+    document.getElementById('confirmTitle').textContent=title;
+    document.getElementById('confirmName').textContent=name;
+    openModal('modalConfirm');
+  }
+
+  // 规则类型提示（原型演示）
+  function ruleTypeHint(sel){
+    const t=sel.options[sel.selectedIndex].text;
+    if(t.indexOf('溢价率')>-1||t.indexOf('指标')>-1){alert('该规则类型需要的数据源在 P1 接入，当前不可选');}
+  }
+
+
+</script>
+</body>
+</html>
