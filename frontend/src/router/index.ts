@@ -15,7 +15,7 @@ const router = createRouter({
 
         // 告警
         { path: 'alerts', name: 'alert-overview', component: () => import('../views/AlertOverviewView.vue'), meta: { title: '告警总览' } },
-        { path: 'alerts/targets', name: 'alert-targets', component: () => import('../views/AlertTargetsView.vue'), meta: { title: '监控标的' } },
+        { path: 'alerts/targets', name: 'alert-targets', component: () => import('../views/AlertTargetsView.vue'), meta: { title: '监控' } },
         { path: 'alerts/rules', name: 'alert-rules', component: () => import('../views/AlertRulesView.vue'), meta: { title: '告警规则' } },
         { path: 'alerts/history', name: 'alert-history', component: () => import('../views/AlertHistoryView.vue'), meta: { title: '告警历史' } },
 

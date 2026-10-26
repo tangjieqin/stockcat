@@ -93,6 +93,14 @@ export function ruleTypeLabel(type: string): string {
   return RULE_TYPES.find((t) => t.value === type)?.label ?? type
 }
 
+/** 规则名自动拼接：{标的名称} {条件}{阈值}，如「贵州茅台 价格≥1000」「中兴通讯 涨跌幅≥+5%」 */
+export function autoRuleName(instrumentName: string, ruleType: string, threshold: number): string {
+  const v = Number(threshold)
+  const isPercent = ruleType.startsWith('CHANGE_PERCENT') || ruleType.startsWith('PREMIUM')
+  const sign = ruleType.includes('BELOW') || v < 0 ? '' : v > 0 ? '+' : ''
+  return `${instrumentName} ${ruleTypeLabel(ruleType)}${isPercent ? `${sign}${v}%` : `¥${v}`}`
+}
+
 export function formatParams(type: string, params: Record<string, unknown>): string {
   const def = RULE_TYPES.find((t) => t.value === type)
   if (!def || params.threshold == null) return JSON.stringify(params)

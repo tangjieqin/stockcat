@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * 监控标的页（告警引擎的监控对象，与自选列表独立）。
+ * 监控页（告警引擎的监控对象，与自选列表独立）。
+ * 添加时可直接带上告警规则（自动命名）；持仓标志由交易流水实时推导。
  * 对应 docs/UI.md 2.x「告警-监控标的」与 docs/API.md §2。
  */
 import { onMounted, ref } from 'vue'
@@ -11,16 +12,30 @@ import {
   updateMonitorTargetEnabled,
   type MonitorTarget,
 } from '../api/instrument'
+import { autoRuleName, createAlertRule, RULE_TYPES } from '../api/alert'
 import { ApiError } from '../api/client'
 import { changeColor } from '../api/quote'
+import { listPositions } from '../api/trade'
 
 const targets = ref<MonitorTarget[]>([])
+const holdingIds = ref<Set<number>>(new Set())
 const loading = ref(false)
 const errorMsg = ref('')
 
+const holding = (t: MonitorTarget) => holdingIds.value.has(t.instrument.id)
+
 // 添加弹窗状态
 const showAdd = ref(false)
-const form = ref({ market: 'CN_A', symbol: '', type: 'STOCK', name: '' })
+const form = ref({
+  market: 'CN_A',
+  symbol: '',
+  type: 'STOCK',
+  name: '',
+  withRule: true,
+  ruleType: 'PRICE_ABOVE',
+  threshold: 0,
+  cooldownMinutes: 30,
+})
 const addError = ref('')
 const submitting = ref(false)
 
@@ -28,7 +43,9 @@ async function load() {
   loading.value = true
   errorMsg.value = ''
   try {
-    targets.value = await listMonitorTargets()
+    const [targetList, positions] = await Promise.all([listMonitorTargets(), listPositions()])
+    targets.value = targetList
+    holdingIds.value = new Set(positions.filter((p) => p.quantity > 0).map((p) => p.instrumentId))
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -44,14 +61,31 @@ async function submitAdd() {
   }
   submitting.value = true
   try {
-    await addMonitorTarget({
+    // 1. 添加监控（名称由行情源自动补全）
+    const created = await addMonitorTarget({
       market: form.value.market,
       symbol: form.value.symbol.trim(),
       type: form.value.type,
       name: form.value.name.trim() || undefined,
     })
+    // 2. 同步创建告警规则（自动命名，失败不影响已添加的监控）
+    if (form.value.withRule) {
+      try {
+        await createAlertRule({
+          name: autoRuleName(created.instrument.name, form.value.ruleType, Number(form.value.threshold)),
+          instrumentId: created.instrument.id,
+          ruleType: form.value.ruleType,
+          params: { threshold: Number(form.value.threshold) },
+          cooldownMinutes: Number(form.value.cooldownMinutes) || 0,
+        })
+      } catch (e) {
+        addError.value = `标的已添加，但规则创建失败：${e instanceof ApiError ? e.message : '请重试'}（可在「规则」页手动创建）`
+        await load()
+        return
+      }
+    }
     showAdd.value = false
-    form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '' }
+    form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '', withRule: true, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 }
     await load()
   } catch (e) {
     addError.value = e instanceof ApiError ? e.message : '添加失败，请重试'
@@ -70,7 +104,7 @@ async function toggle(t: MonitorTarget) {
 }
 
 async function remove(t: MonitorTarget) {
-  if (!confirm(`确定移除监控标的「${t.instrument.symbol} ${t.instrument.name}」吗？\n（仅移除监控关系，不影响标的主数据与历史数据）`)) {
+  if (!confirm(`确定移除监控「${t.instrument.symbol} ${t.instrument.name}」吗？\n（仅移除监控关系，不影响标的主数据与历史数据；其告警规则保留，可在规则页清理）`)) {
     return
   }
   try {
@@ -88,10 +122,10 @@ onMounted(load)
   <div>
     <div class="page-head">
       <div>
-        <h1>监控标的</h1>
-        <p class="sub">告警引擎的评估范围；行情与告警只针对这里启用的标的。与「自选列表」相互独立。</p>
+        <h1>监控</h1>
+        <p class="sub">告警引擎的评估范围；行情与告警只针对这里启用的标的。与「自选列表」相互独立；「持仓」由交易流水实时推导。</p>
       </div>
-      <button class="btn primary" @click="showAdd = true">＋ 添加监控标的</button>
+      <button class="btn primary" @click="showAdd = true">＋ 添加监控</button>
     </div>
 
     <div v-if="errorMsg" class="banner error">{{ errorMsg }}</div>
@@ -104,6 +138,7 @@ onMounted(load)
           <th>市场</th>
           <th>类型</th>
           <th>最新价</th>
+          <th>持仓</th>
           <th>状态</th>
           <th style="width: 140px">操作</th>
         </tr>
@@ -116,6 +151,10 @@ onMounted(load)
           <td>{{ t.instrument.type }}</td>
           <td class="mono" :style="{ color: changeColor(t.quote?.changePercent) }">
             {{ t.quote?.lastPrice ?? '—' }}
+          </td>
+          <td>
+            <span v-if="holding(t)" class="badge hold">持仓中</span>
+            <span v-else class="muted">—</span>
           </td>
           <td>
             <span class="badge" :class="t.enabled ? 'ok' : 'off'">{{ t.enabled ? '监控中' : '已停用' }}</span>
@@ -134,7 +173,7 @@ onMounted(load)
     <!-- 添加弹窗 -->
     <div v-if="showAdd" class="modal-mask" @click.self="showAdd = false">
       <div class="modal">
-        <h2>添加监控标的</h2>
+        <h2>添加监控</h2>
         <div class="form-row">
           <label>市场</label>
           <select v-model="form.market">
@@ -158,6 +197,33 @@ onMounted(load)
           <input v-model="form.name" placeholder="标的不存在时必填（P0 无数据源）" />
         </div>
         <p class="hint">若标的已存在可不填名称；新标的需填写名称（P0.3 接入数据源后自动补全）。</p>
+
+        <div class="rule-section">
+          <label class="rule-check">
+            <input v-model="form.withRule" type="checkbox" />
+            同时创建告警规则（规则名按下方选择自动拼接）
+          </label>
+          <template v-if="form.withRule">
+            <div class="form-row">
+              <label>类型</label>
+              <select v-model="form.ruleType">
+                <option v-for="t in RULE_TYPES.filter((x) => x.phase === 'P0')" :key="t.value" :value="t.value">
+                  {{ t.label }}
+                </option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>阈值</label>
+              <input v-model.number="form.threshold" type="number" step="0.01" />
+            </div>
+            <div class="form-row">
+              <label>冷却</label>
+              <input v-model.number="form.cooldownMinutes" type="number" min="0" />
+              <span class="unit">分钟</span>
+            </div>
+          </template>
+        </div>
+
         <div v-if="addError" class="banner error">{{ addError }}</div>
         <div class="modal-foot">
           <button class="btn" @click="showAdd = false">取消</button>
@@ -215,6 +281,10 @@ onMounted(load)
 .badge.ok {
   background: #ecfdf5;
   color: #047857;
+}
+.badge.hold {
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 .badge.off {
   background: var(--bg-hover);
@@ -288,6 +358,24 @@ onMounted(load)
   font-size: 13px;
 }
 .hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.rule-section {
+  border-top: 1px dashed var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.rule-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.unit {
   font-size: 12px;
   color: var(--text-tertiary);
 }

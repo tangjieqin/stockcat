@@ -5,6 +5,7 @@
  */
 import { onMounted, ref } from 'vue'
 import {
+  autoRuleName,
   createAlertRule,
   deleteAlertRule,
   formatParams,
@@ -23,7 +24,7 @@ const loading = ref(false)
 const errorMsg = ref('')
 
 const showAdd = ref(false)
-const form = ref({ name: '', instrumentId: 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 })
+const form = ref({ instrumentId: 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 })
 const addError = ref('')
 const submitting = ref(false)
 
@@ -46,19 +47,21 @@ async function load() {
 
 async function submitAdd() {
   addError.value = ''
-  if (!form.value.name.trim()) return (addError.value = '请输入规则名称')
-  if (!form.value.instrumentId) return (addError.value = '请先在「监控标的」页添加标的')
+  if (!form.value.instrumentId) return (addError.value = '请先在「监控」页添加标的')
   submitting.value = true
   try {
+    // 规则名自动拼接：{标的名称} {条件}{阈值}
+    const target = targets.value.find((t) => t.instrument.id === form.value.instrumentId)
+    const instrumentName = target?.instrument.name ?? target?.instrument.symbol ?? '规则'
     await createAlertRule({
-      name: form.value.name.trim(),
+      name: autoRuleName(instrumentName, form.value.ruleType, Number(form.value.threshold)),
       instrumentId: form.value.instrumentId,
       ruleType: form.value.ruleType,
       params: { threshold: Number(form.value.threshold) },
       cooldownMinutes: Number(form.value.cooldownMinutes) || 0,
     })
     showAdd.value = false
-    form.value = { name: '', instrumentId: targets.value[0]?.instrument.id ?? 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 }
+    form.value = { instrumentId: targets.value[0]?.instrument.id ?? 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 }
     await load()
   } catch (e) {
     addError.value = e instanceof ApiError ? e.message : '创建失败，请重试'
@@ -176,7 +179,7 @@ onMounted(load)
     </table>
 
     <div v-else-if="!loading" class="empty">
-      暂无规则。先在「监控标的」添加标的，再点击「新建规则」。
+      暂无规则。先在「监控」添加标的（可顺带创建规则），或点击「新建规则」。
     </div>
     <div v-else>加载中…</div>
 
@@ -185,10 +188,6 @@ onMounted(load)
       <div class="modal">
         <h2>新建告警规则</h2>
         <div class="form-row">
-          <label>名称</label>
-          <input v-model="form.name" placeholder="如 茅台跌破1700提醒" />
-        </div>
-        <div class="form-row">
           <label>标的</label>
           <select v-model="form.instrumentId">
             <option v-for="t in targets" :key="t.id" :value="t.instrument.id">
@@ -196,7 +195,7 @@ onMounted(load)
             </option>
           </select>
         </div>
-        <p class="hint inline-hint">标的选择范围 = 「监控标的」页已添加的标的（只有它们会被采集行情）；要监控其他标的请先去「监控标的」页添加。</p>
+        <p class="hint inline-hint">标的选择范围 = 「监控」页已添加的标的（只有它们会被采集行情）；要监控其他标的请先去「监控」页添加。</p>
         <div class="form-row">
           <label>类型</label>
           <select v-model="form.ruleType">

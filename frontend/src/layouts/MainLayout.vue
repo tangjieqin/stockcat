@@ -18,7 +18,7 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
     label: '告警',
     items: [
       { label: '总览', to: '/alerts' },
-      { label: '监控标的', to: '/alerts/targets' },
+      { label: '监控', to: '/alerts/targets' },
       { label: '规则', to: '/alerts/rules' },
       { label: '历史', to: '/alerts/history' },
     ],
