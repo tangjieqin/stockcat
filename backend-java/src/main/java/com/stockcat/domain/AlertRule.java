@@ -13,7 +13,8 @@ public class AlertRule {
     private String ruleType;
     /** params JSONB 的字符串形式（服务层用 Jackson 解析/生成） */
     private String paramsJson;
-    private Integer cooldownMinutes;
+    /** 冷却时间（秒）。触发后该时段内不重复推送；前端可按秒/分钟/小时填写，存储统一为秒 */
+    private Integer cooldownSeconds;
     private Boolean enabled;
     private OffsetDateTime lastTriggeredAt;
     private OffsetDateTime createdAt;
@@ -62,12 +63,12 @@ public class AlertRule {
         this.paramsJson = paramsJson;
     }
 
-    public Integer getCooldownMinutes() {
-        return cooldownMinutes;
+    public Integer getCooldownSeconds() {
+        return cooldownSeconds;
     }
 
-    public void setCooldownMinutes(Integer cooldownMinutes) {
-        this.cooldownMinutes = cooldownMinutes;
+    public void setCooldownSeconds(Integer cooldownSeconds) {
+        this.cooldownSeconds = cooldownSeconds;
     }
 
     public Boolean getEnabled() {

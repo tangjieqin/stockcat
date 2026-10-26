@@ -12,7 +12,7 @@ public record AlertRuleResponse(
         String instrumentName,
         String ruleType,
         Object params,
-        Integer cooldownMinutes,
+        Integer cooldownSeconds,
         Boolean enabled,
         OffsetDateTime lastTriggeredAt,
         OffsetDateTime createdAt
@@ -25,7 +25,7 @@ public record AlertRuleResponse(
             // params 已在创建时校验过，理论上不会失败
         }
         return new AlertRuleResponse(r.getId(), r.getName(), r.getInstrumentId(), r.getSymbol(),
-                r.getInstrumentName(), r.getRuleType(), params, r.getCooldownMinutes(),
+                r.getInstrumentName(), r.getRuleType(), params, r.getCooldownSeconds(),
                 r.getEnabled(), r.getLastTriggeredAt(), r.getCreatedAt());
     }
 }

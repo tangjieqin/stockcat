@@ -42,20 +42,20 @@ public class AlertRuleController {
     @PostMapping("/alert-rules")
     public ResponseEntity<AlertRuleResponse> create(@Valid @RequestBody CreateAlertRuleRequest req) {
         AlertRule created = service.create(req.name(), req.instrumentId(), req.ruleType(),
-                toJson(req.params()), req.cooldownMinutes(), req.enabled());
+                toJson(req.params()), req.cooldownSeconds(), req.enabled());
         return ResponseEntity.created(URI.create("/api/v1/alert-rules/" + created.getId()))
                 .body(AlertRuleResponse.from(created));
     }
 
     public record BatchRequest(@NotEmpty List<Long> instrumentIds, @NotBlank String name,
                                @NotBlank String ruleType, java.util.Map<String, Object> params,
-                               Integer cooldownMinutes, Boolean enabled) {
+                               Integer cooldownSeconds, Boolean enabled) {
     }
 
     @PostMapping("/alert-rules/batch")
     public AlertRuleService.BatchResult createBatch(@Valid @RequestBody BatchRequest req) {
         return service.createBatch(req.instrumentIds(), req.name(), req.ruleType(),
-                toJson(req.params()), req.cooldownMinutes(), req.enabled());
+                toJson(req.params()), req.cooldownSeconds(), req.enabled());
     }
 
     @PatchMapping("/alert-rules/{id}")
@@ -63,7 +63,7 @@ public class AlertRuleController {
         // params 为 null 表示本次不修改参数（PATCH 语义），不能序列化成 "{}" 触发参数校验
         String paramsJson = req.params() == null ? null : toJson(req.params());
         return AlertRuleResponse.from(service.update(id, req.name(), req.ruleType(), paramsJson,
-                req.cooldownMinutes(), req.enabled()));
+                req.cooldownSeconds(), req.enabled()));
     }
 
     @DeleteMapping("/alert-rules/{id}")

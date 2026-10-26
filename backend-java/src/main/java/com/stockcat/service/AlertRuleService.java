@@ -43,7 +43,7 @@ public class AlertRuleService {
 
     @Transactional
     public AlertRule create(String name, Long instrumentId, String ruleType,
-                            String paramsJson, Integer cooldownMinutes, Boolean enabled) {
+                            String paramsJson, Integer cooldownSeconds, Boolean enabled) {
         Instrument instrument = instrumentMapper.findById(instrumentId);
         if (instrument == null) {
             throw ApiException.notFound("标的不存在: id=" + instrumentId);
@@ -51,8 +51,8 @@ public class AlertRuleService {
         // 规则类型与参数校验（含边界语义说明见评估器实现）
         RuleEvaluator evaluator = registry.get(ruleType);
         evaluator.validateParams(parse(paramsJson));
-        if (cooldownMinutes != null && cooldownMinutes < 0) {
-            throw ApiException.validationError("cooldownMinutes 不能为负");
+        if (cooldownSeconds != null && cooldownSeconds < 0) {
+            throw ApiException.validationError("cooldownSeconds 不能为负");
         }
 
         AlertRule rule = new AlertRule();
@@ -60,7 +60,7 @@ public class AlertRuleService {
         rule.setInstrumentId(instrumentId);
         rule.setRuleType(ruleType);
         rule.setParamsJson(paramsJson);
-        rule.setCooldownMinutes(cooldownMinutes == null ? 30 : cooldownMinutes);
+        rule.setCooldownSeconds(cooldownSeconds == null ? 1800 : cooldownSeconds);
         rule.setEnabled(enabled == null || enabled);
         ruleMapper.insert(rule);
         return ruleMapper.findById(rule.getId());
@@ -77,13 +77,13 @@ public class AlertRuleService {
     }
 
     public BatchResult createBatch(List<Long> instrumentIds, String name, String ruleType,
-                                   String paramsJson, Integer cooldownMinutes, Boolean enabled) {
+                                   String paramsJson, Integer cooldownSeconds, Boolean enabled) {
         List<BatchItem> results = new ArrayList<>();
         int succeeded = 0;
         int failed = 0;
         for (Long instrumentId : instrumentIds) {
             try {
-                AlertRule created = create(name, instrumentId, ruleType, paramsJson, cooldownMinutes, enabled);
+                AlertRule created = create(name, instrumentId, ruleType, paramsJson, cooldownSeconds, enabled);
                 results.add(new BatchItem(instrumentId, "SUCCESS", created.getId(), null));
                 succeeded++;
             } catch (ApiException e) {
@@ -95,12 +95,12 @@ public class AlertRuleService {
     }
 
     /**
-     * PATCH：允许 name/ruleType/params/cooldownMinutes/enabled（标的不允许换，需删除重建）。
+     * PATCH：允许 name/ruleType/params/cooldownSeconds/enabled（标的不允许换，需删除重建）。
      * ruleType 可改：以目标类型校验参数（未传 params 时用现有参数校验，不兼容则报错）。
      */
     @Transactional
     public AlertRule update(Long id, String name, String ruleType, String paramsJson,
-                            Integer cooldownMinutes, Boolean enabled) {
+                            Integer cooldownSeconds, Boolean enabled) {
         AlertRule existing = ruleMapper.findById(id);
         if (existing == null) {
             throw ApiException.notFound("规则不存在: id=" + id);
@@ -109,7 +109,7 @@ public class AlertRuleService {
         RuleEvaluator evaluator = registry.get(targetType); // 未知类型在 registry.get 内报 VALIDATION_ERROR
         String effectiveParams = paramsJson != null ? paramsJson : existing.getParamsJson();
         evaluator.validateParams(parse(effectiveParams));
-        ruleMapper.updateFields(id, name, ruleType, paramsJson, cooldownMinutes, enabled);
+        ruleMapper.updateFields(id, name, ruleType, paramsJson, cooldownSeconds, enabled);
         return ruleMapper.findById(id);
     }
 

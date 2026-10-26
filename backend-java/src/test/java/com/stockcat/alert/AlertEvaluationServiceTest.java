@@ -59,7 +59,7 @@ class AlertEvaluationServiceTest {
         r.setInstrumentId(100L);
         r.setRuleType(type);
         r.setParamsJson(params);
-        r.setCooldownMinutes(cooldown);
+        r.setCooldownSeconds(cooldown);
         r.setEnabled(true);
         r.setLastTriggeredAt(lastTriggered);
         r.setSymbol("600519");
@@ -132,11 +132,12 @@ class AlertEvaluationServiceTest {
 
     @Test
     void cooldownSuppressesRepeatTrigger() {
-        AlertRule r = rule("PRICE_ABOVE", "{\"threshold\":12.5}", 30, NOW.minusMinutes(10));
+        // cooldown 单位为秒：1800 = 30 分钟
+        AlertRule r = rule("PRICE_ABOVE", "{\"threshold\":12.5}", 1800, NOW.minusMinutes(10));
         assertThat(service.evaluate(r, quote(12.6, 1.0, "VALID"), NOW)).isEmpty();
 
         // 冷却期已过 -> 可再次触发
-        AlertRule r2 = rule("PRICE_ABOVE", "{\"threshold\":12.5}", 30, NOW.minusMinutes(31));
+        AlertRule r2 = rule("PRICE_ABOVE", "{\"threshold\":12.5}", 1800, NOW.minusMinutes(31));
         assertThat(service.evaluate(r2, quote(12.6, 1.0, "VALID"), NOW)).isPresent();
     }
 

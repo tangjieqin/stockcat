@@ -9,8 +9,8 @@ import java.util.List;
 public interface AlertRuleMapper {
 
     @Insert("""
-            INSERT INTO alert_rule (name, instrument_id, rule_type, params, cooldown_minutes, enabled, created_at, updated_at)
-            VALUES (#{name}, #{instrumentId}, #{ruleType}, CAST(#{paramsJson} AS jsonb), #{cooldownMinutes},
+            INSERT INTO alert_rule (name, instrument_id, rule_type, params, cooldown_seconds, enabled, created_at, updated_at)
+            VALUES (#{name}, #{instrumentId}, #{ruleType}, CAST(#{paramsJson} AS jsonb), #{cooldownSeconds},
                     #{enabled}, now(), now())
             """)
     @Options(useGeneratedKeys = true, keyProperty = "id")
@@ -18,7 +18,7 @@ public interface AlertRuleMapper {
 
     @Select("""
             SELECT r.id, r.name, r.instrument_id, r.rule_type, r.params::text AS params_json,
-                   r.cooldown_minutes, r.enabled, r.last_triggered_at, r.created_at, r.updated_at,
+                   r.cooldown_seconds, r.enabled, r.last_triggered_at, r.created_at, r.updated_at,
                    i.symbol, i.name AS instrument_name
             FROM alert_rule r
             JOIN instrument i ON i.id = r.instrument_id
@@ -29,7 +29,7 @@ public interface AlertRuleMapper {
     @Select("""
             <script>
             SELECT r.id, r.name, r.instrument_id, r.rule_type, r.params::text AS params_json,
-                   r.cooldown_minutes, r.enabled, r.last_triggered_at, r.created_at, r.updated_at,
+                   r.cooldown_seconds, r.enabled, r.last_triggered_at, r.created_at, r.updated_at,
                    i.symbol, i.name AS instrument_name
             FROM alert_rule r
             JOIN instrument i ON i.id = r.instrument_id
@@ -69,7 +69,7 @@ public interface AlertRuleMapper {
                 <if test="name != null">, name = #{name}</if>
                 <if test="ruleType != null">, rule_type = #{ruleType}</if>
                 <if test="paramsJson != null">, params = CAST(#{paramsJson} AS jsonb)</if>
-                <if test="cooldownMinutes != null">, cooldown_minutes = #{cooldownMinutes}</if>
+                <if test="cooldownSeconds != null">, cooldown_seconds = #{cooldownSeconds}</if>
                 <if test="enabled != null">, enabled = #{enabled}</if>
             </set>
             WHERE id = #{id}
@@ -77,7 +77,7 @@ public interface AlertRuleMapper {
             """)
     int updateFields(@Param("id") Long id, @Param("name") String name, @Param("ruleType") String ruleType,
                      @Param("paramsJson") String paramsJson,
-                     @Param("cooldownMinutes") Integer cooldownMinutes, @Param("enabled") Boolean enabled);
+                     @Param("cooldownSeconds") Integer cooldownSeconds, @Param("enabled") Boolean enabled);
 
     @Update("UPDATE alert_rule SET last_triggered_at = #{at}, updated_at = now() WHERE id = #{id}")
     int updateLastTriggered(@Param("id") Long id, @Param("at") java.time.OffsetDateTime at);

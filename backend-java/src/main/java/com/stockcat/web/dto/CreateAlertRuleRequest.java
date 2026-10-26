@@ -11,7 +11,7 @@ public record CreateAlertRuleRequest(
         @NotNull Long instrumentId,
         @NotBlank String ruleType,
         Map<String, Object> params,
-        @Min(0) Integer cooldownMinutes,
+        @Min(0) Integer cooldownSeconds,
         Boolean enabled
 ) {
 }

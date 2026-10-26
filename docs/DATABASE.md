@@ -101,12 +101,12 @@
   - 涨跌幅类：`{"threshold": -20}`（百分数值，跌 20% 为 -20）
   - 溢价率类（P1）：`{"threshold": 2.0}`
   - 指标类（P1）：`{"indicator":"MACD","fast":12,"slow":26,"signal":9,"direction":"golden"}`
-- `cooldown_minutes INTEGER NOT NULL DEFAULT 30`
+- `cooldown_seconds INTEGER NOT NULL DEFAULT 1800`（V3 起以秒为单位，支持秒/分钟/小时粒度；原 cooldown_minutes 已迁移换算）
 - `enabled BOOLEAN NOT NULL DEFAULT TRUE`
 - `last_triggered_at TIMESTAMPTZ`
 - `created_at TIMESTAMPTZ NOT NULL`
 - `updated_at TIMESTAMPTZ NOT NULL`
-- 校验：`cooldown_minutes >= 0`；`params` 必须通过该 `rule_type` 的参数 schema 校验；创建时校验该类型所需数据已接入（如溢价率规则要求 IOPV 数据可用），否则拒绝，避免建了永不触发的"死规则"。
+- 校验：`cooldown_seconds >= 0`；`params` 必须通过该 `rule_type` 的参数 schema 校验；创建时校验该类型所需数据已接入（如溢价率规则要求 IOPV 数据可用），否则拒绝，避免建了永不触发的"死规则"。
 - 索引：`(enabled, instrument_id)`
 - 扩展方式：新增规则类型 = 新增一个 `rule_type` 值 + 一个 evaluator 实现 + 一个参数 schema，**不修改表结构**。
 - 多规则语义：**同一标的可挂任意多条规则**（`instrument_id` 无唯一约束），每条规则独立评估、独立冷却、独立产生事件与通知；同一时刻多条规则同时满足时生成多条并列的 `alert_event`，不合并。

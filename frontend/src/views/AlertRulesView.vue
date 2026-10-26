@@ -6,14 +6,18 @@
 import { onMounted, ref } from 'vue'
 import {
   autoRuleName,
+  cooldownLabel,
+  cooldownToSeconds,
   createAlertRule,
   deleteAlertRule,
   formatParams,
   listAlertRules,
   RULE_TYPES,
+  splitCooldown,
   updateAlertRule,
   updateAlertRuleEnabled,
   type AlertRule,
+  type CooldownUnit,
 } from '../api/alert'
 import { listMonitorTargets, type MonitorTarget } from '../api/instrument'
 import { ApiError } from '../api/client'
@@ -24,7 +28,7 @@ const loading = ref(false)
 const errorMsg = ref('')
 
 const showAdd = ref(false)
-const form = ref({ instrumentId: 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 })
+const form = ref({ instrumentId: 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownValue: 30, cooldownUnit: 'm' as CooldownUnit })
 const addError = ref('')
 const submitting = ref(false)
 
@@ -58,10 +62,10 @@ async function submitAdd() {
       instrumentId: form.value.instrumentId,
       ruleType: form.value.ruleType,
       params: { threshold: Number(form.value.threshold) },
-      cooldownMinutes: Number(form.value.cooldownMinutes) || 0,
+      cooldownSeconds: cooldownToSeconds(Number(form.value.cooldownValue) || 0, form.value.cooldownUnit),
     })
     showAdd.value = false
-    form.value = { instrumentId: targets.value[0]?.instrument.id ?? 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 }
+    form.value = { instrumentId: targets.value[0]?.instrument.id ?? 0, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownValue: 30, cooldownUnit: 'm' }
     await load()
   } catch (e) {
     addError.value = e instanceof ApiError ? e.message : '创建失败，请重试'
@@ -81,18 +85,20 @@ async function toggle(r: AlertRule) {
 
 // ---- 修改规则（名称/阈值/冷却可改；标的与类型不可改） ----
 const editing = ref<AlertRule | null>(null)
-const editForm = ref({ name: '', ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 })
+const editForm = ref({ name: '', ruleType: 'PRICE_ABOVE', threshold: 0, cooldownValue: 30, cooldownUnit: 'm' as CooldownUnit })
 const editError = ref('')
 const editSubmitting = ref(false)
 
 function openEdit(r: AlertRule) {
   editing.value = r
   editError.value = ''
+  const cd = splitCooldown(r.cooldownSeconds ?? 0)
   editForm.value = {
     name: r.name,
     ruleType: r.ruleType,
     threshold: Number(r.params.threshold ?? 0),
-    cooldownMinutes: r.cooldownMinutes,
+    cooldownValue: cd.value,
+    cooldownUnit: cd.unit,
   }
 }
 
@@ -106,7 +112,7 @@ async function submitEdit() {
       name: editForm.value.name.trim(),
       ruleType: editForm.value.ruleType,
       params: { threshold: Number(editForm.value.threshold) },
-      cooldownMinutes: Number(editForm.value.cooldownMinutes) || 0,
+      cooldownSeconds: cooldownToSeconds(Number(editForm.value.cooldownValue) || 0, editForm.value.cooldownUnit),
     })
     const idx = rules.value.findIndex((x) => x.id === updated.id)
     if (idx >= 0) rules.value[idx] = updated
@@ -164,7 +170,7 @@ onMounted(load)
           <td>{{ r.name }}</td>
           <td><span class="mono">{{ r.symbol }}</span> {{ r.instrumentName }}</td>
           <td class="cond">{{ formatParams(r.ruleType, r.params) }}</td>
-          <td>{{ r.cooldownMinutes }} 分钟</td>
+          <td>{{ cooldownLabel(r.cooldownSeconds ?? 0) }}</td>
           <td class="muted">{{ fmtTime(r.lastTriggeredAt) }}</td>
           <td>
             <span class="badge" :class="r.enabled ? 'ok' : 'off'">{{ r.enabled ? '启用' : '停用' }}</span>
@@ -211,8 +217,12 @@ onMounted(load)
         </div>
         <div class="form-row">
           <label>冷却时间</label>
-          <input v-model.number="form.cooldownMinutes" type="number" min="0" />
-          <span class="unit">分钟</span>
+          <input v-model.number="form.cooldownValue" type="number" min="0" />
+          <select v-model="form.cooldownUnit" class="unit-select">
+            <option value="s">秒</option>
+            <option value="m">分钟</option>
+            <option value="h">小时</option>
+          </select>
         </div>
         <p class="hint">触发一次后，在冷却时间内即使条件持续满足也不再重复推送，防止同一提醒刷屏。填 0 表示每次满足都推送（慎用）。</p>
         <div v-if="addError" class="banner error">{{ addError }}</div>
@@ -250,8 +260,12 @@ onMounted(load)
         </div>
         <div class="form-row">
           <label>冷却时间</label>
-          <input v-model.number="editForm.cooldownMinutes" type="number" min="0" />
-          <span class="unit">分钟</span>
+          <input v-model.number="editForm.cooldownValue" type="number" min="0" />
+          <select v-model="editForm.cooldownUnit" class="unit-select">
+            <option value="s">秒</option>
+            <option value="m">分钟</option>
+            <option value="h">小时</option>
+          </select>
         </div>
         <p class="hint">类型可改（参数按新类型校验）；如需更换标的请删除后重建（历史事件快照不受影响）。</p>
         <div v-if="editError" class="banner error">{{ editError }}</div>
@@ -399,6 +413,9 @@ onMounted(load)
 .unit {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+.unit-select {
+  width: 90px;
 }
 .hint {
   font-size: 12px;

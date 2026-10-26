@@ -154,7 +154,7 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
   "instrumentId": 1,
   "ruleType": "PRICE_ABOVE",
   "params": {"threshold": 12.50},
-  "cooldownMinutes": 30,
+  "cooldownSeconds": 1800,
   "enabled": true
 }
 ```
@@ -174,7 +174,7 @@ P1 计划：`PREMIUM_ABOVE`/`PREMIUM_BELOW`（溢价率）、`INDICATOR_CROSS`�
 
 ### `PATCH /alert-rules/{id}`
 
-允许更新 `name`、`ruleType`、`params`、`cooldownMinutes`、`enabled`。`ruleType` 可改：以目标类型校验参数（未传 `params` 时用现有参数校验，不兼容返回 `400`）。**标的不允许**用 PATCH 更换，需要换标的时应删除重建，历史事件快照不受影响。
+允许更新 `name`、`ruleType`、`params`、`cooldownSeconds`、`enabled`。`ruleType` 可改：以目标类型校验参数（未传 `params` 时用现有参数校验，不兼容返回 `400`）。**标的不允许**用 PATCH 更换，需要换标的时应删除重建，历史事件快照不受影响。冷却时间统一以秒为单位存储（前端可按秒/分钟/小时输入换算）。
 
 ### `DELETE /alert-rules/{id}`
 

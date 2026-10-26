@@ -9,7 +9,8 @@ export interface AlertRule {
   instrumentName: string
   ruleType: string
   params: Record<string, unknown>
-  cooldownMinutes: number
+  /** 冷却时间（秒）。存储统一为秒，界面可按秒/分钟/小时输入 */
+  cooldownSeconds: number
   enabled: boolean
   lastTriggeredAt: string | null
   createdAt: string
@@ -55,12 +56,34 @@ export async function listAlertRules(params: { page?: number; size?: number }): 
   return resp.data
 }
 
+export type CooldownUnit = 's' | 'm' | 'h'
+
+/** 界面输入值 + 单位 → 秒 */
+export function cooldownToSeconds(value: number, unit: CooldownUnit): number {
+  const factor = unit === 'h' ? 3600 : unit === 'm' ? 60 : 1
+  return Math.max(0, Math.round(value * factor))
+}
+
+/** 秒 → 界面输入（自动选最大能整除的单位，便于回显） */
+export function splitCooldown(seconds: number): { value: number; unit: CooldownUnit } {
+  if (seconds >= 3600 && seconds % 3600 === 0) return { value: seconds / 3600, unit: 'h' }
+  if (seconds >= 60 && seconds % 60 === 0) return { value: seconds / 60, unit: 'm' }
+  return { value: seconds, unit: 's' }
+}
+
+/** 秒 → 人类可读文案（表格列显示用） */
+export function cooldownLabel(seconds: number): string {
+  if (!seconds) return '不冷却'
+  const { value, unit } = splitCooldown(seconds)
+  return `${value} ${unit === 'h' ? '小时' : unit === 'm' ? '分钟' : '秒'}`
+}
+
 export async function createAlertRule(req: {
   name: string
   instrumentId: number
   ruleType: string
   params: Record<string, number>
-  cooldownMinutes: number
+  cooldownSeconds: number
 }): Promise<AlertRule> {
   const resp = await http.post<AlertRule>('/alert-rules', req)
   return resp.data
@@ -74,7 +97,7 @@ export async function updateAlertRuleEnabled(id: number, enabled: boolean): Prom
 /** 修改规则（名称/类型/参数/冷却时间；标的不变更，需删除重建） */
 export async function updateAlertRule(
   id: number,
-  req: { name: string; ruleType?: string; params: Record<string, number>; cooldownMinutes: number },
+  req: { name: string; ruleType?: string; params: Record<string, number>; cooldownSeconds: number },
 ): Promise<AlertRule> {
   const resp = await http.patch<AlertRule>(`/alert-rules/${id}`, req)
   return resp.data

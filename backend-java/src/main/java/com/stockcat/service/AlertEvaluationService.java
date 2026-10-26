@@ -58,10 +58,10 @@ public class AlertEvaluationService {
         if (quote == null || !"VALID".equals(quote.dataStatus()) || quote.lastPrice() == null) {
             return Optional.empty();
         }
-        // 2. 冷却检查
-        int cooldown = rule.getCooldownMinutes() == null ? 30 : rule.getCooldownMinutes();
-        if (rule.getLastTriggeredAt() != null
-                && rule.getLastTriggeredAt().plusMinutes(cooldown).isAfter(now)) {
+        // 2. 冷却检查（cooldownSeconds，0 表示每次满足都推送）
+        int cooldown = rule.getCooldownSeconds() == null ? 1800 : rule.getCooldownSeconds();
+        if (cooldown > 0 && rule.getLastTriggeredAt() != null
+                && rule.getLastTriggeredAt().plusSeconds(cooldown).isAfter(now)) {
             return Optional.empty();
         }
         // 3. 评估

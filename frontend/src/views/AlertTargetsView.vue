@@ -12,7 +12,7 @@ import {
   updateMonitorTargetEnabled,
   type MonitorTarget,
 } from '../api/instrument'
-import { autoRuleName, createAlertRule, RULE_TYPES } from '../api/alert'
+import { autoRuleName, cooldownToSeconds, createAlertRule, RULE_TYPES, type CooldownUnit } from '../api/alert'
 import { ApiError } from '../api/client'
 import { changeColor } from '../api/quote'
 import { listPositions } from '../api/trade'
@@ -34,7 +34,8 @@ const form = ref({
   withRule: true,
   ruleType: 'PRICE_ABOVE',
   threshold: 0,
-  cooldownMinutes: 30,
+  cooldownValue: 30,
+  cooldownUnit: 'm' as CooldownUnit,
 })
 const addError = ref('')
 const submitting = ref(false)
@@ -76,7 +77,7 @@ async function submitAdd() {
           instrumentId: created.instrument.id,
           ruleType: form.value.ruleType,
           params: { threshold: Number(form.value.threshold) },
-          cooldownMinutes: Number(form.value.cooldownMinutes) || 0,
+          cooldownSeconds: cooldownToSeconds(Number(form.value.cooldownValue) || 0, form.value.cooldownUnit),
         })
       } catch (e) {
         addError.value = `标的已添加，但规则创建失败：${e instanceof ApiError ? e.message : '请重试'}（可在「规则」页手动创建）`
@@ -85,7 +86,7 @@ async function submitAdd() {
       }
     }
     showAdd.value = false
-    form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '', withRule: true, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownMinutes: 30 }
+    form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '', withRule: true, ruleType: 'PRICE_ABOVE', threshold: 0, cooldownValue: 30, cooldownUnit: 'm' }
     await load()
   } catch (e) {
     addError.value = e instanceof ApiError ? e.message : '添加失败，请重试'
@@ -217,9 +218,13 @@ onMounted(load)
               <input v-model.number="form.threshold" type="number" step="0.01" />
             </div>
             <div class="form-row">
-              <label>冷却</label>
-              <input v-model.number="form.cooldownMinutes" type="number" min="0" />
-              <span class="unit">分钟</span>
+              <label>冷却时间</label>
+              <input v-model.number="form.cooldownValue" type="number" min="0" />
+              <select v-model="form.cooldownUnit" class="unit-select">
+                <option value="s">秒</option>
+                <option value="m">分钟</option>
+                <option value="h">小时</option>
+              </select>
             </div>
           </template>
         </div>
@@ -378,6 +383,9 @@ onMounted(load)
 .unit {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+.unit-select {
+  width: 90px;
 }
 .banner.error {
   background: #fdf2f2;
