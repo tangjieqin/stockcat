@@ -174,3 +174,71 @@ export async function searchDiary(keyword: string): Promise<Array<{ id: number; 
   })
   return resp.data
 }
+
+/** AI 日记辅助（P2 场景四）：只出建议稿，不落库 */
+
+export interface DiaryInstrument {
+  symbol: string
+  name: string | null
+}
+
+export interface DiaryRefineResult {
+  title: string | null
+  mode: 'llm' | 'rule_based'
+  result: {
+    summary: string | null
+    highlights: string[]
+    instruments: DiaryInstrument[]
+    followUps: string[]
+    /** 规则模式下为 null：规则不做改写 */
+    refined: string | null
+  }
+  knownInstrumentCount: number
+  limitations: string[]
+  generatedAt: string
+  model: string | null
+  degraded: string[]
+  elapsedMs: number
+}
+
+export interface DiaryReviewHit {
+  nodeId: number | null
+  title: string | null
+  path: string | null
+  preview: string | null
+  updatedAt: string | null
+}
+
+export interface DiaryReviewResult {
+  keyword: string
+  hitCount: number
+  /** 没有命中任何日记：此时不调模型，也不给任何总结 */
+  empty: boolean
+  mode: 'llm' | 'rule_based'
+  theme: string | null
+  threads: Array<{ title: string; date: string | null; path: string | null; point: string | null }>
+  recurring: string[]
+  gaps: string[]
+  citations: string[]
+  hits: DiaryReviewHit[]
+  limitations: string[]
+  generatedAt: string
+  model: string | null
+  degraded: string[]
+  elapsedMs: number
+}
+
+/** 整理一篇日记。content 传编辑器里的当前内容——未保存也能整理 */
+export async function refineDiary(req: {
+  nodeId?: number | null
+  title?: string
+  content?: string
+}): Promise<DiaryRefineResult> {
+  const resp = await http.post<DiaryRefineResult>('/diary/ai/refine', req)
+  return resp.data
+}
+
+export async function reviewDiary(keyword: string, limit?: number): Promise<DiaryReviewResult> {
+  const resp = await http.post<DiaryReviewResult>('/diary/ai/review', { keyword, limit })
+  return resp.data
+}

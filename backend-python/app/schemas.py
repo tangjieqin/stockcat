@@ -245,3 +245,85 @@ class AgentAlertExplainResponse(CamelModel):
     degraded: list[str] = Field(default_factory=list)
     elapsed_ms: int
 
+
+# ------------------------------------------------------ 日记 AI 辅助（P2 场景四）
+
+
+class AgentDiaryInstrument(CamelModel):
+    """已知标的白名单条目：整理结果里的标的只能落在这个范围内。"""
+
+    symbol: str
+    name: str | None = None
+
+
+class AgentDiaryRefineRequest(CamelModel):
+    title: str = ""
+    content: str = Field(description="日记正文；可以是编辑器里尚未保存的内容")
+    known_instruments: list[AgentDiaryInstrument] = Field(
+        default_factory=list,
+        description="已知标的白名单（自选 + 持仓），模型给出的标的不许超出这一范围",
+    )
+
+
+class AgentDiaryRefineResult(CamelModel):
+    summary: str | None = Field(default=None, description="一句话概括原文写了什么")
+    highlights: list[str] = Field(default_factory=list, description="要点，优先取带数字与操作词的句子")
+    instruments: list[AgentDiaryInstrument] = Field(default_factory=list)
+    follow_ups: list[str] = Field(default_factory=list, description="待跟进事项")
+    refined: str | None = Field(
+        default=None, description="整理后的正文；规则模式下为 null——规则不做改写"
+    )
+
+
+class AgentDiaryRefineResponse(CamelModel):
+    title: str | None = None
+    mode: str = Field(description="llm = 模型整理；rule_based = 规则提取")
+    result: AgentDiaryRefineResult
+    known_instrument_count: int = Field(default=0, description="本次可用的已知标的数量")
+    limitations: list[str] = Field(default_factory=list, description="数据限制，恒由模板生成")
+    generated_at: str
+    model: str | None = None
+    usage: AgentUsage | None = None
+    degraded: list[str] = Field(default_factory=list)
+    elapsed_ms: int
+
+
+class AgentDiaryReviewRequest(CamelModel):
+    keyword: str = Field(description="检索词；日记回顾不接受空关键词")
+    limit: int | None = Field(default=None, description="命中篇数上限，默认 5、最大 10")
+
+
+class AgentDiaryReviewHit(CamelModel):
+    node_id: int | None = None
+    title: str | None = None
+    path: str | None = None
+    preview: str | None = None
+    updated_at: str | None = None
+
+
+class AgentDiaryReviewThread(CamelModel):
+    title: str
+    date: str | None = None
+    path: str | None = None
+    point: str | None = None
+
+
+class AgentDiaryReviewResponse(CamelModel):
+    keyword: str
+    hit_count: int
+    empty: bool = Field(description="没有命中任何日记；此时不调模型，明确说明没找到")
+    mode: str = Field(description="llm = 模型归纳；rule_based = 只做检索罗列")
+    theme: str | None = None
+    threads: list[AgentDiaryReviewThread] = Field(default_factory=list)
+    recurring: list[str] = Field(default_factory=list, description="反复出现的事")
+    gaps: list[str] = Field(default_factory=list, description="日记里没写清楚的地方")
+    citations: list[str] = Field(default_factory=list, description="引用，只来自命中列表")
+    hits: list[AgentDiaryReviewHit] = Field(default_factory=list, description="原始命中，供用户自行核对")
+    tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    generated_at: str
+    model: str | None = None
+    usage: AgentUsage | None = None
+    degraded: list[str] = Field(default_factory=list)
+    elapsed_ms: int
+

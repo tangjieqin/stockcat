@@ -136,9 +136,9 @@ onMounted(load)
       <div v-else class="empty">未取到工具清单（AI 服务不可用）</div>
     </section>
 
-    <!-- 三个 AI 场景 -->
+    <!-- 四个 AI 场景 -->
     <section class="card block">
-      <h2>已接入的三个场景</h2>
+      <h2>已接入的四个场景</h2>
       <div class="table-wrap">
         <table class="table">
           <thead>
@@ -167,6 +167,12 @@ onMounted(load)
               <td>市场复盘页「✨ AI 生成草稿」</td>
               <td>固定取 5 类数据 → 模型成文 → 存为 AI 草稿</td>
               <td>规则底稿；缺任一段整篇退回底稿，不拼半截</td>
+            </tr>
+            <tr>
+              <td>日记整理 / 回顾</td>
+              <td>我的日记页「✨ AI 整理」「AI 回顾」</td>
+              <td>整理只读本篇正文；回顾先检索再归纳，引用只认命中篇目</td>
+              <td>规则提取要点与标的（不给改写稿）；回顾只罗列检索结果</td>
             </tr>
           </tbody>
         </table>

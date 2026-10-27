@@ -126,7 +126,8 @@ public class AgentToolDtos {
     public record Recaps(int count, List<RecapSummary> items) {
     }
 
-    public record DiaryHit(Long nodeId, String title, String path, String contentPreview) {
+    public record DiaryHit(Long nodeId, String title, String path, String contentPreview,
+                           OffsetDateTime updatedAt) {
     }
 
     public record DiarySearch(String keyword, int count, List<DiaryHit> hits) {

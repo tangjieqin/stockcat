@@ -2,6 +2,7 @@ package com.stockcat.service;
 
 import com.stockcat.common.ApiException;
 import com.stockcat.domain.AlertEvent;
+import com.stockcat.domain.DiaryNode;
 import com.stockcat.domain.MarketRecap;
 import com.stockcat.mapper.AlertEventMapper;
 import com.stockcat.web.dto.AgentToolDtos.*;
@@ -288,12 +289,17 @@ public class AgentToolService {
         List<DiaryHit> hits = new ArrayList<>();
         for (DiaryService.DiarySearchHit hit : diaryService.search(trimmed, effective)) {
             String content = null;
+            OffsetDateTime updatedAt = null;
             try {
-                content = preview(diaryService.get(hit.id()).getContent());
+                DiaryNode node = diaryService.get(hit.id());
+                content = preview(node.getContent());
+                // 回顾要说清"哪天的想法"：没有时间戳，日记回顾就退化成一段无出处的总结
+                updatedAt = node.getUpdatedAt();
             } catch (ApiException ignored) {
                 // 命中后被删：不给预览，标题与路径仍然有效
             }
-            hits.add(new DiaryHit(hit.id(), hit.title(), String.join(" / ", hit.path()), content));
+            hits.add(new DiaryHit(hit.id(), hit.title(), String.join(" / ", hit.path()),
+                    content, updatedAt));
         }
         List<String> missing = hits.isEmpty() ? List.of("未命中任何日记（关键词：" + trimmed + "）") : List.of();
         return AgentToolResponse.of("diary-search", null, new DiarySearch(trimmed, hits.size(), hits), missing);

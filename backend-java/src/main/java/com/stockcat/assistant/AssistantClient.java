@@ -75,6 +75,22 @@ public class AssistantClient {
         return post("/agent/v1/recap/draft", Map.of("date", date));
     }
 
+    /**
+     * 整理一篇日记（**不落库**）。正文可以是编辑器里尚未保存的内容，
+     * 所以 payload 由调用方拼好，这里不做业务判断。
+     */
+    public Map<String, Object> refineDiary(Map<String, Object> payload) {
+        return post("/agent/v1/diary/refine", payload);
+    }
+
+    /** 按关键词回顾日记：Python 先走只读工具检索，命中为空时不调模型。 */
+    public Map<String, Object> reviewDiary(String keyword, int limit) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("keyword", keyword);
+        payload.put("limit", limit);
+        return post("/agent/v1/diary/review", payload);
+    }
+
     private Map<String, Object> post(String path, Map<String, Object> payload) {
         String body = toJson(payload);
         HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))

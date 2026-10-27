@@ -29,6 +29,7 @@ _MAX_ITEMS = 8
 _MAX_OUTPUT_TOKENS = 900
 _MAX_ALERT_TOKENS = 500
 _MAX_RECAP_TOKENS = 1800
+_MAX_DIARY_TOKENS = 1500
 # market_recap.title 是 VARCHAR(128)：模型偶尔写长标题，落库前必须截断
 _MAX_TITLE_CHARS = 128
 
@@ -78,6 +79,39 @@ _RECAP_SYSTEM_PROMPT = """你是 StockCat 的每日复盘起草助手。用户�
 
 只输出一个 JSON 对象，不要 markdown 代码块、不要额外解释，结构如下：
 {"title": "不超过 32 字的标题", "marketSummary": "2~4 句，含指数与自选涨跌的关键数值", "sectorNotes": "自选分组与持仓结构的变化，注明非行业板块数据", "content": "Markdown 正文，含 大盘/自选表现/持仓/告警/前情/数据说明 六个小节"}
+"""
+
+
+_DIARY_REFINE_PROMPT = """你是 StockCat 的日记整理助手。用户会给出自己写的一篇投资日记（可能很散乱），
+以及一份已知标的白名单。
+
+你的任务是整理，不是改写观点：把内容归类清楚，但不替用户判断对错、不补充他没写过的事实。
+
+硬性禁止（违反即视为错误输出）：
+1. 不得引入原文没有的数字、日期、标的、盈亏、仓位；不得自己换算（如用价格×份额算市值）。
+2. instruments 只能从给的白名单里选，白名单外的一律不写——哪怕原文里明明白白出现了那个代码。
+3. 不得写投资建议、目标价、点位预测；整理的始终是用户自己的想法。
+4. refined 必须是原文信息的重组：可以分小节、加小标题，但不得新增内容，
+   也不得把"待跟进"这类事项删掉——那正是用户回头要找的东西。
+5. summary 一句话，不超过 60 字，只概括原文写了什么。
+
+只输出一个 JSON 对象，不要 markdown 代码块：
+{"summary": "...", "highlights": ["..."], "instruments": [{"symbol": "...", "name": "..."}], "followUps": ["..."], "refined": "Markdown 正文"}
+"""
+
+_DIARY_REVIEW_PROMPT = """你是 StockCat 的日记回顾助手。用户给出一个关键词，以及按该关键词检索命中的
+若干篇日记片段。
+
+你的任务是做回顾，不是评价：指出这些日记里反复出现的主题、一直没解决的事、以及明显的空白。
+
+硬性禁止（违反即视为错误输出）：
+1. 只能引用命中列表里的日记，title 必须与列表完全一致；不得虚构篇目、日期或原文没有的观点。
+2. 不得引入行情、盈亏、政策等命中片段之外的事实。
+3. 不得给买卖建议、不得预测后市、不得评价用户水平。
+4. 命中片段很短时如实说"片段有限"，不要用推测补全。
+
+只输出一个 JSON 对象，不要 markdown 代码块：
+{"theme": "这次回顾的主题，一到两句", "threads": [{"title": "命中日记的完整标题", "point": "这篇里的关键点"}], "recurring": ["反复出现的事"], "gaps": ["日记里没写清楚的地方"], "citations": ["《标题》日期"]}
 """
 
 
@@ -162,6 +196,53 @@ def draft_recap(user_prompt: str) -> dict[str, Any]:
     return {
         "ok": True,
         "draft": draft,
+        "error": None,
+        "usage": result["usage"],
+        "elapsedMs": result["elapsedMs"],
+    }
+
+
+def refine_diary(user_prompt: str) -> dict[str, Any]:
+    """整理日记。返回 ``{"ok", "view", "error", "usage", "elapsedMs"}``。
+
+    ``view`` 是模型原始 JSON，业务校验（标的白名单、段落是否齐全）由
+    ``diary_assist.accept_refine`` 做——模型层只负责"拿到一个 JSON"。"""
+    if not is_configured():
+        return _fail_diary(MODEL_NOT_CONFIGURED, "未配置模型（STOCKCAT_LLM_* 为空），本次为规则提取")
+
+    result = _chat(_DIARY_REFINE_PROMPT, user_prompt, _MAX_DIARY_TOKENS)
+    if not result["ok"]:
+        return _fail_diary(result["errorCode"], result["error"], elapsed=result["elapsedMs"])
+
+    view = _parse_object(result["content"])
+    if view is None:
+        return _fail_diary(MODEL_OUTPUT_INVALID, "模型输出不是可解析的 JSON，已降级为规则提取",
+                           elapsed=result["elapsedMs"])
+    return {
+        "ok": True,
+        "view": view,
+        "error": None,
+        "usage": result["usage"],
+        "elapsedMs": result["elapsedMs"],
+    }
+
+
+def review_diary(user_prompt: str) -> dict[str, Any]:
+    """按关键词回顾日记。返回结构与 :func:`refine_diary` 相同。"""
+    if not is_configured():
+        return _fail_diary(MODEL_NOT_CONFIGURED, "未配置模型（STOCKCAT_LLM_* 为空），本次只做检索")
+
+    result = _chat(_DIARY_REVIEW_PROMPT, user_prompt, _MAX_DIARY_TOKENS)
+    if not result["ok"]:
+        return _fail_diary(result["errorCode"], result["error"], elapsed=result["elapsedMs"])
+
+    view = _parse_object(result["content"])
+    if view is None:
+        return _fail_diary(MODEL_OUTPUT_INVALID, "模型输出不是可解析的 JSON，已降级为检索罗列",
+                           elapsed=result["elapsedMs"])
+    return {
+        "ok": True,
+        "view": view,
         "error": None,
         "usage": result["usage"],
         "elapsedMs": result["elapsedMs"],
@@ -365,6 +446,38 @@ def _parse_recap(content: str | None) -> dict[str, str] | None:
     draft["sectorNotes"] = draft["sectorNotes"][:2000]
     draft["content"] = draft["content"][:8000]
     return draft
+
+
+def _parse_object(content: str | None) -> dict[str, Any] | None:
+    """从模型输出里抠一个 JSON 对象出来；抠不到就返回 None，让上层降级。
+
+    不重试、不猜——"再问一次也许就对了"会让同一次请求的耗时翻倍且结果不可复现。
+    """
+    if not content or not content.strip():
+        return None
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text.split("\n", 1)[1] if "\n" in text else text
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        parsed = json.loads(text[start:end + 1])
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _fail_diary(code: str, detail: str, started: float | None = None,
+                elapsed: int | None = None) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "view": None,
+        "error": f"{code}: {detail}",
+        "usage": None,
+        "elapsedMs": elapsed if elapsed is not None else _elapsed_ms(started or time.monotonic()),
+    }
 
 
 def _fail_recap(code: str, detail: str, started: float | None = None,

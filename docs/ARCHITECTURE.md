@@ -14,7 +14,7 @@ flowchart LR
   JAVA -->|实时快照请求| RT[Eastmoney Push2 候选源]
   JAVA -->|内部 HTTP：历史/基金参考数据| PYDATA[Python FastAPI 数据适配器，P1]
   PYDATA --> SRC[已验证的数据源]
-  UI -.->|P2 用户 AI 请求| AGENT[Python LangChain Agent]
+  UI -.->|P2 用户 AI 请求| AGENT[Python Agent（httpx 直连模型）]
   AGENT -->|受控只读业务 API| JAVA
   JAVA -->|告警通知| NOTICE[邮件 + 一个已验证推送渠道]
 ```
@@ -27,7 +27,7 @@ flowchart LR
 - Java 服务：Java 21、Spring Boot 3、Spring Web、Validation、MyBatis（已定：数据访问统一使用 MyBatis，不用 JPA/JDBC 混用）。
 - 数据库：PostgreSQL。
 - 技术指标：P1 由 Java 自研计算（MACD/RSI/KDJ）。原计划用 ta4j，实测其 RSI 平滑系数、KDJ 递推与通达信不一致（RSI6 差 13 点），为保证与看盘软件同值改为自研，理由见 `PLAN_P1.md` P1.3。
-- Python：Python 3.12+（具体小版本按依赖兼容性验证后锁定）、FastAPI、Pydantic；P2 使用 LangChain。
+- Python：Python 3.12+（具体小版本按依赖兼容性验证后锁定）、FastAPI、Pydantic；P2 的 Agent **不引 LangChain**，用 `httpx` 直连 OpenAI 兼容 `/chat/completions`（工具固定 6 个只读 GET，框架只增加依赖与升级风险）。
 - 测试：Java JUnit 5；Python pytest；前端按实际采用的测试工具补齐。
 - 部署：本地开发可用 Docker Compose 启动 PostgreSQL；应用进程可本机运行。Docker 不是业务逻辑依赖。
 
@@ -63,7 +63,7 @@ flowchart LR
 - 返回数据给 Java；Java 校验后写入权威业务表。
 - 不直接写业务数据库，不负责告警判断。
 
-### 3.4 Python LangChain Agent（P2）
+### 3.4 Python Agent（P2，`app/agent/`）
 
 - 理解用户提出的复盘/查询问题。
 - 通过受控工具调用 Java 只读 API。

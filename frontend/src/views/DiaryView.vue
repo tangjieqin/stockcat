@@ -9,9 +9,13 @@ import {
   deleteDiaryNode,
   diaryTree,
   getDiaryNode,
+  refineDiary,
+  reviewDiary,
   searchDiary,
   updateDiaryNode,
   type DiaryNodeView,
+  type DiaryRefineResult,
+  type DiaryReviewResult,
 } from '../api/recap'
 import { ApiError } from '../api/client'
 
@@ -33,6 +37,20 @@ const createError = ref('')
 const showMove = ref(false)
 const moveTarget = ref<number | null>(null)
 const moveError = ref('')
+
+// AI 整理（不落库）：弹出建议稿，用户点「应用到正文」才写进编辑器，再自己保存
+const showRefine = ref(false)
+const refining = ref(false)
+const refineResult = ref<DiaryRefineResult | null>(null)
+const refineDraft = ref('')
+const refineError = ref('')
+
+// AI 回顾：按关键词检索历史日记并归纳
+const showReview = ref(false)
+const reviewKeyword = ref('')
+const reviewing = ref(false)
+const reviewResult = ref<DiaryReviewResult | null>(null)
+const reviewError = ref('')
 
 /** 树按展开状态展平为 (节点, 深度) 列表 */
 const flatNodes = computed(() => {
@@ -190,6 +208,66 @@ async function doSearch() {
   searchHits.value = await searchDiary(searchKeyword.value.trim())
 }
 
+// ------------------------------------------------------------------ AI 整理
+
+async function openRefine() {
+  if (!detail.value || detail.value.nodeType !== 'DOC') return
+  showRefine.value = true
+  refining.value = true
+  refineError.value = ''
+  refineResult.value = null
+  refineDraft.value = ''
+  try {
+    // 传编辑器里的当前内容：用户改了还没保存，要整理的也是眼前这一版
+    const r = await refineDiary({
+      nodeId: detail.value.id,
+      title: detail.value.title,
+      content: detail.value.content,
+    })
+    refineResult.value = r
+    refineDraft.value = r.result.refined ?? ''
+  } catch (e) {
+    refineError.value = e instanceof ApiError ? e.message : '整理失败'
+  } finally {
+    refining.value = false
+  }
+}
+
+/** 只写进编辑器并标记未保存——AI 不能替用户点保存 */
+function applyRefined() {
+  if (!detail.value || !refineDraft.value.trim()) return
+  detail.value.content = refineDraft.value
+  dirty.value = true
+  showRefine.value = false
+}
+
+// ------------------------------------------------------------------ AI 回顾
+
+async function doReview() {
+  if (!reviewKeyword.value.trim()) return
+  reviewing.value = true
+  reviewError.value = ''
+  reviewResult.value = null
+  try {
+    reviewResult.value = await reviewDiary(reviewKeyword.value.trim(), 5)
+  } catch (e) {
+    reviewError.value = e instanceof ApiError ? e.message : '回顾失败'
+  } finally {
+    reviewing.value = false
+  }
+}
+
+function jumpToHit(nodeId: number | null) {
+  if (nodeId == null) return
+  showReview.value = false
+  select(nodeId)
+}
+
+function jumpToThread(title: string | null) {
+  const hit = reviewResult.value?.hits.find((h) => h.title === title)
+  jumpToHit(hit?.nodeId ?? null)
+}
+
 onMounted(load)
 </script>
 
@@ -199,6 +277,7 @@ onMounted(load)
     <aside class="tree-pane">
       <div class="pane-head">
         <input v-model="searchKeyword" class="search" placeholder="🔍 搜索文档" @input="doSearch" />
+        <button class="btn tiny" @click="showReview = true">AI 回顾</button>
       </div>
 
       <div v-if="searchHits" class="search-result">
@@ -238,6 +317,7 @@ onMounted(load)
       <div class="editor-head">
         <input v-model="detail.title" class="title-input" @input="dirty = true" />
         <div class="head-ops">
+          <button v-if="detail.nodeType === 'DOC'" class="btn small" @click="openRefine">AI 整理</button>
           <button class="btn small" @click="openMove">移动</button>
           <button class="btn small primary" :disabled="saving || !dirty" @click="save">
             {{ saving ? '保存中…' : '保存' }}
@@ -291,6 +371,170 @@ onMounted(load)
         </div>
       </div>
     </div>
+
+    <!-- AI 整理弹窗：建议稿，不写库 -->
+    <div v-if="showRefine" class="modal-mask" @click.self="showRefine = false">
+      <div class="modal wide">
+        <h2>AI 整理「{{ detail?.title }}」</h2>
+
+        <div v-if="refining" class="hint">正在整理……</div>
+        <div v-else-if="refineError" class="banner error">{{ refineError }}</div>
+
+        <template v-else-if="refineResult">
+          <div class="ai-meta">
+            <span class="chip">{{ refineResult.mode === 'llm' ? '模型整理' : '规则提取' }}</span>
+            <span v-if="refineResult.model">{{ refineResult.model }}</span>
+            <span>{{ refineResult.elapsedMs }}ms</span>
+            <span>可用标的 {{ refineResult.knownInstrumentCount }} 个</span>
+          </div>
+
+          <div v-for="d in refineResult.degraded" :key="d" class="banner warn">{{ d }}</div>
+
+          <div class="zone">
+            <div class="zone-label">概要</div>
+            <p class="ai-text">{{ refineResult.result.summary || '（没有可概括的内容）' }}</p>
+          </div>
+
+          <div class="zone">
+            <div class="zone-label">要点</div>
+            <ul v-if="refineResult.result.highlights.length" class="ai-list">
+              <li v-for="(h, i) in refineResult.result.highlights" :key="i">{{ h }}</li>
+            </ul>
+            <p v-else class="hint">没有提取到要点</p>
+          </div>
+
+          <div class="zone">
+            <div class="zone-label">涉及标的（只认自选与持仓）</div>
+            <p v-if="refineResult.result.instruments.length" class="chips">
+              <span v-for="i in refineResult.result.instruments" :key="i.symbol" class="chip">
+                {{ i.symbol }} {{ i.name }}
+              </span>
+            </p>
+            <p v-else class="hint">
+              文中没有出现自选或持仓中的标的（按代码或证券全称匹配，写简称可能认不出）
+            </p>
+          </div>
+
+          <div class="zone">
+            <div class="zone-label">待跟进</div>
+            <ul v-if="refineResult.result.followUps.length" class="ai-list">
+              <li v-for="(f, i) in refineResult.result.followUps" :key="i">{{ f }}</li>
+            </ul>
+            <p v-else class="hint">没有识别到「待跟进」这类句子</p>
+          </div>
+
+          <div class="zone">
+            <div class="zone-label">整理稿</div>
+            <textarea v-if="refineDraft" v-model="refineDraft" rows="10" class="ai-draft"></textarea>
+            <p v-else class="hint">
+              规则模式不提供改写稿 —— 换个说法不等于整理。以上提取结果可直接参考；
+              想要成稿版本的整理，需要先配置模型。
+            </p>
+          </div>
+
+          <div class="ai-limits">
+            <div class="zone-label">数据说明</div>
+            <ul class="ai-list">
+              <li v-for="(l, i) in refineResult.limitations" :key="i">{{ l }}</li>
+            </ul>
+          </div>
+        </template>
+
+        <div class="modal-foot">
+          <button class="btn" @click="showRefine = false">关闭</button>
+          <button class="btn primary" :disabled="!refineDraft.trim()" @click="applyRefined">
+            应用到正文（不自动保存）
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 回顾弹窗：先检索再归纳，没命中就直说 -->
+    <div v-if="showReview" class="modal-mask" @click.self="showReview = false">
+      <div class="modal wide">
+        <h2>AI 回顾日记</h2>
+        <div class="form-row">
+          <label>检索词</label>
+          <input v-model="reviewKeyword" placeholder="如 减仓 / 茅台 / 心态" @keyup.enter="doReview" />
+        </div>
+
+        <div v-if="reviewing" class="hint">正在检索并回顾……</div>
+        <div v-else-if="reviewError" class="banner error">{{ reviewError }}</div>
+
+        <template v-else-if="reviewResult">
+          <div v-if="reviewResult.empty" class="banner warn">
+            没有找到包含「{{ reviewResult.keyword }}」的日记，因此不做任何总结 ——
+            没有材料时编一段回顾，是最难被发现的错。
+          </div>
+          <template v-else>
+            <div class="ai-meta">
+              <span class="chip">{{ reviewResult.mode === 'llm' ? '模型归纳' : '仅检索罗列' }}</span>
+              <span>命中 {{ reviewResult.hitCount }} 篇</span>
+              <span>{{ reviewResult.elapsedMs }}ms</span>
+            </div>
+            <div v-for="d in reviewResult.degraded" :key="d" class="banner warn">{{ d }}</div>
+
+            <div v-if="reviewResult.theme" class="zone">
+              <div class="zone-label">回顾</div>
+              <p class="ai-text">{{ reviewResult.theme }}</p>
+            </div>
+
+            <div v-if="reviewResult.threads.length" class="zone">
+              <div class="zone-label">线索</div>
+              <ul class="ai-list">
+                <li v-for="(t, i) in reviewResult.threads" :key="i">
+                  <a href="#" @click.prevent="jumpToThread(t.title)">《{{ t.title }}》</a>
+                  <span v-if="t.date" class="muted"> {{ t.date }}</span>
+                  <div v-if="t.point" class="muted">{{ t.point }}</div>
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="reviewResult.recurring.length" class="zone">
+              <div class="zone-label">反复出现的</div>
+              <ul class="ai-list">
+                <li v-for="(r, i) in reviewResult.recurring" :key="i">{{ r }}</li>
+              </ul>
+            </div>
+
+            <div v-if="reviewResult.gaps.length" class="zone">
+              <div class="zone-label">没写清楚的</div>
+              <ul class="ai-list">
+                <li v-for="(g, i) in reviewResult.gaps" :key="i">{{ g }}</li>
+              </ul>
+            </div>
+
+            <div class="zone">
+              <div class="zone-label">命中日记（点击打开）</div>
+              <div v-for="(h, i) in reviewResult.hits" :key="i" class="hit" @click="jumpToHit(h.nodeId)">
+                <div class="hit-title">{{ h.title }}</div>
+                <div class="hit-path">
+                  {{ h.path }}<span v-if="h.updatedAt"> · {{ h.updatedAt.slice(0, 10) }}</span>
+                </div>
+                <div class="ai-text">{{ h.preview }}</div>
+              </div>
+            </div>
+          </template>
+
+          <div class="ai-limits">
+            <div class="zone-label">数据说明</div>
+            <ul class="ai-list">
+              <li v-for="(l, i) in reviewResult.limitations" :key="i">{{ l }}</li>
+            </ul>
+            <p v-if="reviewResult.citations.length" class="muted">
+              引用：{{ reviewResult.citations.join('、') }}
+            </p>
+          </div>
+        </template>
+
+        <div class="modal-foot">
+          <button class="btn" @click="showReview = false">关闭</button>
+          <button class="btn primary" :disabled="reviewing || !reviewKeyword.trim()" @click="doReview">
+            {{ reviewing ? '回顾中…' : '开始回顾' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -307,10 +551,13 @@ onMounted(load)
   overflow-y: auto;
 }
 .pane-head {
+  display: flex;
+  gap: 6px;
   padding: 0 4px 10px;
 }
 .search {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -509,5 +756,73 @@ onMounted(load)
   color: var(--text-tertiary);
   padding: 16px 8px;
   font-size: 12px;
+}
+
+/* ---- AI 整理 / 回顾 ---- */
+.modal.wide {
+  width: 760px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+.ai-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+}
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.zone {
+  margin-bottom: 12px;
+}
+.zone-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.ai-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  margin: 0;
+}
+.ai-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.ai-draft {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  font-family: inherit;
+  resize: vertical;
+}
+.ai-limits {
+  border-top: 1px dashed var(--border);
+  padding-top: 10px;
+  margin-top: 4px;
 }
 </style>

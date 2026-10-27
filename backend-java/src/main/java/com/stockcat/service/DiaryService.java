@@ -164,7 +164,8 @@ public class DiaryService {
             return docCount;
         }
         mapper.deleteSubtree(id);
-        return 0;
+        // 删的是 1 篇文档，就报 1；报 0 会让"已删除"看起来像没删
+        return 1;
     }
 
     public long countDocsInSubtree(Long id) {

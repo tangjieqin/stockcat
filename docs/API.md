@@ -579,7 +579,198 @@ AI 解释一条已触发的事件（P2 场景二）。**只读**：不写库、�
 | PATCH | `/diary/nodes/{id}` | 修改 `title`/`content`/`relatedInstrumentIds`；**移动**用 `{"parentId":X,"sortOrder":N}`，服务端做成环与深度校验，违规返回 `400` |
 | DELETE | `/diary/nodes/{id}?confirm=true` | DOC 直接删除；FOLDER 级联删除整棵子树，**必须**带 `confirm=true` 且前端强确认显示将删除的文档数，否则返回 `400` |
 
+删除返回 `{"deletedDocCount": N}`：删 DOC 为 `1`，删 FOLDER 为子树里的文档数——前端用它做删除后的提示。
+
 搜索：`GET /diary/nodes?keyword=...` 对 DOC 的标题与正文做 `ILIKE` 匹配，返回命中文档列表（含其树路径）。
+
+#### AI 辅助（P2 场景四，2026-10-27 已落地）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/diary/ai/refine` | 整理一篇日记：`{"nodeId":7,"title":"...","content":"..."}`。返回建议稿，**不写库** |
+| POST | `/diary/ai/review` | 按关键词回顾：`{"keyword":"白酒","limit":5}`。先检索命中文档，再归纳，**不写库** |
+
+两个接口都**不直接改正文**：整理结果回填到前端编辑器，用户点「保存」才走 `PATCH /diary/nodes/{id}`。
+这和复盘草稿是同一条规矩——AI 不改用户已经写下的东西。
+
+**`/diary/ai/refine`** 的请求字段：`nodeId` 可选（有值时用库里的标题/正文兜底），
+但 `title` / `content` 传了就优先——用户在编辑器里改了还没保存时，整理的应该是眼前这一版。
+正文为空或超过 20000 字返回 `400`（长文请先自行精简，AI 不做长文压缩）。
+
+```json
+{
+  "title": "白酒复盘随手记",
+  "mode": "llm",
+  "result": {
+    "summary": "一句话概括…",
+    "highlights": ["要点一", "要点二"],
+    "instruments": [{"symbol": "600519", "name": "贵州茅台"}],
+    "followUps": ["待跟进：三季报渠道库存"],
+    "refined": "整理后的正文（未保存，由用户决定写不写回）"
+  },
+  "knownInstrumentCount": 6,
+  "limitations": ["仅整理本文内容，不引用外部资料，也不判断对错。"],
+  "generatedAt": "2026-10-27T09:12:00Z",
+  "model": "deepseek-chat",
+  "usage": {"model": "deepseek-chat", "promptTokens": 1203, "completionTokens": 288},
+  "degraded": [],
+  "elapsedMs": 4210
+}
+```
+
+- `knownInstruments` 由 Java 侧组装（自选在前、持仓补充，按代码去重）送给 Python。
+  理由：Python 不连库，「这个标的存不存在」只有库知道。
+- 模型给出的代码若不在白名单内直接丢弃，并在 `limitations` 里列出被丢弃的代码——
+  要让用户看见"AI 认错了被我拦下"，而不是以为"AI 没认出来"。
+- 模型输出缺 `summary` / `highlights` / `refined` 任一段即整篇退回规则提取，不拼半截；
+  `instruments` 与 `followUps` 允许为空。
+- 规则模式（`mode=rule_based`）用句子切分 + 标的词匹配产出 `summary`/`highlights`/`instruments`/`followUps`，
+  **`refined` 恒为 `null`**——把原文换个说法不叫整理，只会让人误以为 AI 读懂了。`degraded` 里必须说明当前是哪种情况。
+- 正文超过 6000 字时只有前 6000 字进 prompt，`limitations` 会写明截断；接口层的 20000 字上限是另一道闸。
+
+**`/diary/ai/review`**：`keyword` 必填（不带词的"总结我的日记"等于让模型自由发挥），
+`limit` 缺省 5、上限 10。命中为空时**不调模型**，直接返回 `empty=true` 与空的分段结构。
+
+```json
+{
+  "keyword": "白酒",
+  "hitCount": 3,
+  "empty": false,
+  "hits": [{"nodeId": 7, "title": "白酒复盘随手记", "path": "投资笔记/行业/白酒复盘随手记",
+            "preview": "…命中片段…", "updatedAt": "2026-10-26T10:00:00Z"}],
+  "mode": "llm",
+  "theme": "白酒仓位的三次调整",
+  "threads": [{"title": "白酒复盘随手记", "date": "2026-10-26", "path": "投资笔记/行业", "point": "减仓理由是渠道库存"}],
+  "recurring": ["反复出现的判断：渠道库存是核心变量"],
+  "gaps": ["2026-08 之后再没记过白酒"],
+  "citations": ["《白酒复盘随手记》2026-10-26"],
+  "toolCalls": [{"tool": "diary-search", "label": "检索日记", "ok": true, "summary": "3 篇命中"}],
+  "limitations": ["只基于命中的日记，未检索新闻与公告，不构成投资建议。"],
+  "generatedAt": "2026-10-27T09:15:00Z",
+  "model": "deepseek-chat",
+  "usage": {"model": "deepseek-chat", "promptTokens": 2310, "completionTokens": 512},
+  "degraded": [],
+  "elapsedMs": 5120
+}
+```
+
+- `citations` 只认命中列表里的篇目：模型引用了列表外的标题，整段替换为由命中列表自拼的引用。
+  引用错就是编造，比没有引用更糟。
+- 检索工具失败（`toolCalls[].ok=false`）时同样不进模型，`empty=true` + `limitations` 记失败原因。
+
+#### 资料库 `/library`（P3.1，外部资料的导入与检索）
+
+与「我的日记」分开：日记是用户写的、可改；资料是外部内容、**导入后正文不可编辑**，
+要换内容就重新导入。两者混在一起会让"引用指向哪一版"说不清。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/library/documents` | 新建资料：`{"title","sourceType","sourceRef","publisher","publishedAt","content","instrumentIds":[],"note"}` |
+| POST | `/library/documents/import` | 上传文本文件（multipart）：`file` + 可选 `title` / `publisher`；只收 `.md` / `.markdown` / `.txt` |
+| GET | `/library/documents?keyword=&page=&size=` | 列表（不含正文），`keyword` 匹配标题与正文 |
+| GET | `/library/documents/{id}` | 详情：含正文、全部片段、关联标的 |
+| GET | `/library/search?keyword=&limit=&instrumentId=` | **片段级检索**（P3.2），见下 |
+| DELETE | `/library/documents/{id}?confirm=true` | 删除资料，片段由外键级联删除；未带 `confirm` 返回 `400` 并告知将删几个片段 |
+
+`sourceType` 只接受 `PASTE` / `FILE`（`URL` 在表结构里预留，接口暂不开——没有验证过的抓取能力）。
+上传 `.pdf` / `.html` 会被 `400` 拒绝并说明替代做法，不静默失败：
+PDF 没有段落概念、HTML 会带导航与页脚，脏文本会一路脏到检索结果。
+
+```json
+{
+  "id": 1, "title": "白酒渠道调研纪要", "sourceType": "PASTE", "sourceRef": null,
+  "publisher": "某券商", "publishedAt": "2026-09-20",
+  "importedAt": "2026-10-27T11:09:30Z", "charCount": 171, "chunkCount": 1,
+  "status": "ACTIVE", "note": null,
+  "content": "…规范化后的全文…",
+  "instrumentIds": [],
+  "chunks": [{"id": 1, "seq": 1, "heading": "渠道跟踪", "content": "…", "charStart": 8, "charEnd": 171}]
+}
+```
+
+**去重**：按 `sha256(规范化正文)` 唯一索引拦截。重复导入返回 `409`，
+message 里带已存在的 id（`这篇资料已在库中（id=1），未重复导入`），前端据此提示并跳转。
+规范化 = 统一换行、去行尾空白、压缩连续空行、去首尾空白、去 BOM——
+同一篇资料不同排版应被视为同一篇。
+
+**切片**（决定引用能不能对得上）：
+- 优先在段落边界切，合并到 300–600 字；单段超长退到句子，仍超长才按 600 字硬切；
+- Markdown 标题（`#` 开头）写入片段的 `heading`，其后的段落继承它；
+- 相邻片段做**整段重叠**：上一片段最后一段带到下一片段开头，避免答案正好落在切口上；
+- `charStart` / `charEnd` 是相对**规范化后正文**的字符区间（左闭右开），引用一律按它回原文取完整片段，
+  不用检索时的截取结果——截断会让引用在语义上失真；
+- 偏移口径是 Java 的 `char` 下标（UTF-16 code unit），引用由 Java 侧 `substring` 取，内部自洽。
+
+上限：单篇正文 20 万字、单篇 800 个片段，超过返回 `400`（说明该拆分了，而不是截断）。
+
+#### 片段级检索 `GET /library/search`（P3.2）
+
+命中单位是**片段**而不是整篇：用户搜"渠道库存"想知道的是"哪一段在讲这个"，
+整篇命中只能告诉他"这篇里某个地方提过"，还得自己翻。
+
+| 参数 | 说明 |
+|---|---|
+| `keyword` | 必填。空白返回 `400`——空查询不能退化成"列出全部片段" |
+| `limit` | 默认 20，上限 50 |
+| `instrumentId` | 只看关联了某标的的资料（可选） |
+
+```json
+{
+  "keyword": "渠道库存",
+  "terms": ["渠道库存"],
+  "hits": [{
+    "chunkId": 4, "documentId": 4, "documentTitle": "三季报点评：600519",
+    "seq": 1, "heading": "三季报要点",
+    "snippet": "…经销商反馈渠道库存仍处高位，公司对批价的管控意愿强烈…",
+    "charStart": 0, "charEnd": 178,
+    "sourceType": "PASTE", "sourceRef": null, "publisher": "某基金",
+    "publishedAt": "2026-10-25", "importedAt": "2026-10-27T11:19:33Z",
+    "score": 6, "matchedTerms": ["渠道库存"], "titleMatched": false
+  }]
+}
+```
+
+**拆词**（`LibrarySearchTerms`）：
+- 先按标点/空白切 token，再各自拆 bigram。"白酒 库存"不会生成跨词的"酒库"碎片；
+- 单字不进 bigram（"的"、"了"命中率太高，会召回整库），只有整条查询只有一个字时才用它兜底；
+- 全角数字转半角（从 PDF/Excel 复制的"６００５１９"否则永远匹配不上）；
+- **不过滤停用词**：P3.0 实测加了词表 precision 只从 0.631 到 0.639，不值得维护。
+
+**门槛**（两条，都是 P3.4 评估倒逼出来的，见 `PLAN_P3_EVAL.md` §8.4）：
+
+- **命中 bigram ≥ 2** 才进结果。长查询会拆出「周期」「变化」「订单」这类通用实词，
+  只靠一个碎片命中就返回，会出现"搜『猪周期能繁母猪存栏』返回一堆讲白酒周期的段落"。
+  只有 1 个 bigram 的查询（2 字词）不设此限——那是精确匹配，不存在这种误报。
+- **多词查询时每个词都要命中**。「黄金 ETF 持仓变化」曾被拆成 6 个 bigram，
+  一篇讲宽基 ETF 的笔记靠 ET/TF 和"变化"就能进结果，而"黄金"一次没出现。
+  这条只在查询被切成多个 token 时生效：「茅台批价」在中文里没有空格，是单个 token，
+  不受影响（否则原文里"茅台"与"批价"分处两段时会被误判成无关）。
+
+**排序**：`score = 整词命中数 × 3 + bigram 命中数`，再按
+`score DESC → occurrences DESC → publishedAt DESC NULLS LAST → importedAt DESC → chunkId`。
+发布日未知的排后面，而不是当作最新或最旧。
+
+`occurrences` 是命中词在该片段里出现的总次数（同分时的第二排序键）：讲渠道库存的段落会提
+3 次，顺带蹭到一次的排后面。**它刻意不进 `score`**——score 的口径要和 P3.0 评估脚本对得上，
+而且长片段天然出现更多次，直接加权会让"长"冒充"相关"。实测这一维对 `recall@5` 没有影响
+（0.882 → 0.882），它只解决"同分按发布时间排毫无道理"这个问题，见 `PLAN_P3_EVAL.md §8.10`。
+
+**三条约束**（都由 P3.0 评估或实测倒逼出来的）：
+- 检索列是「标题 + 正文」：用户常说"我记得有一篇讲渠道库存的"，但正文里未必写着标题里的词。
+- 同一篇最多贡献 3 个片段。标题命中会让该篇每段都得分，不限就是同一篇占满整页。
+- 某篇既然有正文真命中，就丢掉它"仅标题命中"的片段；整篇都只是标题命中的，只留一条。
+  否则搜"调研纪要"会返回同一篇的三段，其中两段正文里根本没有这个词。这类命中带
+  `titleMatched=true`，前端标"仅标题命中"，避免用户以为高亮坏了。
+
+`matchedTerms` 只返回**实际出现在正文里**的词，且去掉被整词覆盖的碎片：
+"600519" 不会连带返回 `60/00/05/51/19`，否则前端高亮会把代码标成一串色块。
+
+无结果时返回空 `hits`，不返回"相关推荐"——没有就是没有。
+关键词只匹配原文，不做同义词扩展，这一点在页面上也写明。
+
+**返回条数可以少于 `limit`**：门槛与收窄都会减少条数，「白酒的渠道库存到底消化了没有」
+这类长查询可能只返回 1–2 条。这是刻意的——凑满 5 条就要拿噪声充数，而"只找到 2 条"
+本身就是质量信号。前端不要补占位，也不要提示"结果较少"。
 
 ## 8. 首页总览
 
@@ -885,9 +1076,22 @@ Python 不做任何指标计算，只把这两块事实讲清楚，
 
 `POST /agent/v1/chat`（多轮对话）**未实现**，P2 不做多轮与会话记忆；当前会话仅存在前端 localStorage。
 
+- `POST /agent/v1/diary/refine` 整理日记（P2 场景四）。
+  请求 `{"title":"...","content":"...","knownInstruments":[{"symbol":"600519","name":"贵州茅台"}]}`，
+  响应即 §7 `POST /diary/ai/refine`（Java 原样代理）。
+  规则提取读全文，模型只读前 `MAX_TEXT_CHARS`(6000) 字，超出时 `limitations` 注明截断。
+
+- `POST /agent/v1/diary/review` 日记回顾（P2 场景四）。
+  请求 `{"keyword":"白酒","limit":5}`，先跑 `diary-search` 工具，命中为空**不调模型**，
+  返回 `empty=true` 与空的 `theme`/`threads`/`recurring`/`gaps`/`citations`。
+
+两个接口都**不落库**：整理稿写不写回正文，由用户在编辑器里点保存决定（走 §7 的 PATCH）。
+`refine` 与 `review` 的校验规则（白名单丢弃、引用只认命中标题、缺段整篇回退）见 §7。
+
 ### P2.6 运行日志（实现约定）
 
-三个场景（问答 / 告警解释 / 复盘草稿）每次调用写**一行** `key=value`，logger 名 `stockcat.agent`：
+五个场景（问答 / 告警解释 / 复盘草稿 / 日记整理 / 日记回顾）每次调用写**一行** `key=value`，
+logger 名 `stockcat.agent`：
 
 ```
 2026-10-27 15:42:11,203 INFO stockcat.agent agent scene=recap date=2026-10-27 mode=llm
@@ -896,12 +1100,15 @@ Python 不做任何指标计算，只把这两块事实讲清楚，
 
 | 字段 | 含义 |
 |---|---|
-| `scene` | `assistant` / `alert` / `recap` |
-| `mode` | `llm` 或 `rule_based`；拒绝生成时为空 |
-| `tools` | `工具名:ok/fail` 列表；告警解释为 `-`（数据由 Java 组装，不经工具） |
+| `scene` | `assistant` / `alert` / `recap` / `diary-refine` / `diary-review` |
+| `mode` | `llm` 或 `rule_based`；拒绝生成时为空；日记回顾命中为空写 `empty` |
+| `tools` | `工具名:ok/fail` 列表；告警解释为 `-`（数据由 Java 组装，不经工具）；日记整理无工具调用 |
 | `usage` | `promptTokens+completionTokens`，未知写 `-` |
 | `err` | 模型侧错误码（`MODEL_TIMEOUT` / `MODEL_ERROR` / `MODEL_OUTPUT_INVALID`）或业务码（如 `NO_DATA` / `TOOL_FAILED`） |
 | `errText` | 截断到 120 字符、压成一行的错误说明 |
+
+日记两个场景额外记 `chars`（整理：正文字数）、`instruments`（整理：识别出的标的数）、
+`keyword` / `hits`（回顾：检索词与命中篇数）——这几个数用来判断"效果差"是输入问题还是模型问题。
 
 **不记** API Key、prompt 原文、回答正文。失败与拒绝生成也要写一条，否则"用户说点了没反应"时无从查起。
 

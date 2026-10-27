@@ -96,6 +96,19 @@ public class RecapDtos {
     public record DiarySearchHit(Long id, String title, List<String> path) {
     }
 
+    /**
+     * 日记 AI 整理请求。
+     *
+     * <p>{@code nodeId} 有值时用库里的内容兜底，但 {@code title}/{@code content} 优先——
+     * 用户在编辑器里改了还没保存时，整理的就该是眼前这一版。
+     */
+    public record DiaryRefineRequest(Long nodeId, String title, String content) {
+    }
+
+    /** 日记 AI 回顾请求：keyword 必填，limit 缺省 5、上限 10。 */
+    public record DiaryReviewRequest(String keyword, Integer limit) {
+    }
+
     public record DeleteResult(long deletedDocCount) {
     }
 }

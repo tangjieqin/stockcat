@@ -7,10 +7,19 @@
 - ``POST /agent/v1/assistant/ask``    一问一答，无会话状态
 - ``POST /agent/v1/alerts/explain``   解释单条已触发告警（P2 场景二）
 - ``POST /agent/v1/recap/draft``      生成每日复盘草稿，**不落库**（P2 场景三）
+- ``POST /agent/v1/diary/refine``     整理一篇日记，**不落库**（P2 场景四）
+- ``POST /agent/v1/diary/review``     按关键词回顾日记，只读检索（P2 场景四）
 """
 from fastapi import APIRouter
 
-from app.agent import alert_service, java_tools, llm, recap_service, service
+from app.agent import (
+    alert_service,
+    diary_service,
+    java_tools,
+    llm,
+    recap_service,
+    service,
+)
 from app.config import settings
 from app.errors import VALIDATION_ERROR, ApiError
 from app.schemas import (
@@ -18,6 +27,10 @@ from app.schemas import (
     AgentAlertExplainResponse,
     AgentAskRequest,
     AgentAskResponse,
+    AgentDiaryRefineRequest,
+    AgentDiaryRefineResponse,
+    AgentDiaryReviewRequest,
+    AgentDiaryReviewResponse,
     AgentHealthResponse,
     AgentRecapDraftRequest,
     AgentRecapDraftResponse,
@@ -72,3 +85,26 @@ def recap_draft(req: AgentRecapDraftRequest) -> AgentRecapDraftResponse:
     这里不碰数据库，也不决定草稿最终长什么样——用户编辑后才成为正式复盘。
     """
     return AgentRecapDraftResponse(**recap_service.generate(req.date))
+
+
+@router.post("/diary/refine", response_model=AgentDiaryRefineResponse, summary="整理一篇日记（不落库）")
+def diary_refine(req: AgentDiaryRefineRequest) -> AgentDiaryRefineResponse:
+    """把散乱的日记整理成结构化建议稿。
+
+    **只整理、不保存**：正文写不写回由用户在编辑器里点保存决定。
+    涉及标的必须落在 Java 传来的白名单里，越界的一律丢弃并写进 limitations。
+    """
+    known = [item.model_dump(mode="json", by_alias=True) for item in req.known_instruments]
+    return AgentDiaryRefineResponse(
+        **diary_service.refine(req.title, req.content, known)
+    )
+
+
+@router.post("/diary/review", response_model=AgentDiaryReviewResponse, summary="按关键词回顾日记")
+def diary_review(req: AgentDiaryReviewRequest) -> AgentDiaryReviewResponse:
+    """先检索再归纳。
+
+    检索不到就到此为止——让模型"就着关键词聊聊"是最容易编造的一段；
+    此时返回 ``empty=true``，前端直接说没找到，不展示任何总结。
+    """
+    return AgentDiaryReviewResponse(**diary_service.review(req.keyword, req.limit))
