@@ -19,6 +19,12 @@ from app.agent.formatting import qty as _qty
 from app.agent.formatting import signed as _signed
 
 
+# 两个"空"的措辞在这里定义：service 需要判断"这段结论是不是兜底文案"，
+# 拿字符串去比对是最笨但最不容易漂的办法（文案只有一处）。
+EMPTY_RESULT_TEXT = "已查询相关数据，但没有找到符合条件的内容。"
+ALL_FAILED_TEXT = "这次没有取到可用的业务数据，无法给出结论。"
+
+
 def compose(results: list[dict[str, Any]]) -> dict[str, list[str]]:
     """返回 {conclusion, evidence, limits}，三个都是字符串列表。"""
     conclusion: list[str] = []
@@ -43,10 +49,7 @@ def compose(results: list[dict[str, Any]]) -> dict[str, list[str]]:
     if not conclusion:
         # 区分两种"空"：一个都没取到 vs 取到了但没有符合条件的内容（如日记无命中）
         all_failed = all(not r.get("ok") for r in results) if results else True
-        conclusion.append(
-            "这次没有取到可用的业务数据，无法给出结论。" if all_failed
-            else "已查询相关数据，但没有找到符合条件的内容。"
-        )
+        conclusion.append(ALL_FAILED_TEXT if all_failed else EMPTY_RESULT_TEXT)
     return {"conclusion": conclusion, "evidence": evidence[:20], "limits": _dedupe(limits)[:20]}
 
 
@@ -175,6 +178,21 @@ def _diary(data: dict[str, Any]) -> tuple[str | None, list[str]]:
     return text, facts
 
 
+def _library(data: dict[str, Any]) -> tuple[str | None, list[str]]:
+    hits = data.get("hits") or []
+    facts: list[str] = []
+    if not hits:
+        # 没有命中就不给结论：这条回答不该由"模型知道的事"来填
+        return None, facts
+    titles = {hit.get("title") for hit in hits}
+    text = (f"资料库命中 {len(hits)} 个片段，来自 {len(titles)} 篇资料"
+            f"（关键词「{data.get('keyword')}」）。")
+    for hit in hits:
+        # citation 由 Java 按真实片段位置拼装，这里直接用，不在前端重新拼一遍
+        facts.append(f"{hit.get('citation')}：{hit.get('snippet') or '（无内容）'}")
+    return text, facts
+
+
 _HANDLERS = {
     "positions": _positions,
     "watchlist-quotes": _watchlist,
@@ -182,6 +200,7 @@ _HANDLERS = {
     "market-brief": _market_brief,
     "recaps": _recaps,
     "diary-search": _diary,
+    "library-search": _library,
 }
 
 

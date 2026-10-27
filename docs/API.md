@@ -728,6 +728,17 @@ AI 解释一条已触发的事件（P2 场景二）。**只读**：不写库、�
 日记正文检索，返回命中标题、树路径（`投资 / 复盘`）与正文预览。`keyword` 必填（空关键词返回校验错误），
 `limit` 默认 5、上限 20。日记没有行情时间语义，`dataAsOf` 为 `null`。
 
+### `GET /agent/tools/library/search?keyword=渠道库存&limit=5`
+
+资料库片段检索（P3.3），命中单位是**片段**。`keyword` 必填，`limit` 默认 5、上限 20。
+
+- 每条命中带 `citation`，格式固定 `《标题》· 第 N 段`，**由服务端按真实的 `seq` 拼装**；
+  模型只允许原样引用这串字符，不许自述出处（Python 侧 `library_guard` 会删掉命中列表以外的引用）。
+- `dataAsOf` 取命中片段中最新的 `importedAt`——它表达"这些资料在库中的时间"，不是行情时间。
+- 没命中时进 `missing`，并区分两种情况：`资料库里还没有任何资料`（共 0 篇）与
+  `资料库共有 N 篇资料，但没有命中「X」的片段`。Python 侧对零命中**直接不调模型**，
+  结论固定写"资料库里没有找到与「X」相关的资料"。
+
 ### `POST /assistant/ask`（前端唯一入口）
 
 前端只跟 Java 说话，所以 AI 助手由 Java 代理到 Python `POST /agent/v1/assistant/ask`（契约见 §11）。
@@ -744,6 +755,7 @@ Java 不改写字段，只做超时（60s）与错误翻译。
   "mode": "rule_based",
   "answer": {"conclusion": "当前持有 1 只标的，合计市值 2,511.60 元…", "evidence": ["510300 …"], "limits": []},
   "toolCalls": [{"tool": "positions", "label": "查询持仓", "ok": true, "summary": "1 只持仓", "elapsedMs": 143}],
+  "citations": [{"chunkId": 13, "documentId": 7, "title": "白酒渠道调研纪要", "seq": 1, "citation": "《白酒渠道调研纪要》· 第 1 段"}],
   "dataAsOf": "2026-10-27T01:26:25Z",
   "generatedAt": "2026-10-27T06:49:57Z",
   "model": null,
@@ -754,6 +766,10 @@ Java 不改写字段，只做超时（60s）与错误翻译。
 ```
 
 - `mode=llm` 为模型生成，`mode=rule_based` 为规则汇总；`degraded` 非空时前端必须展示。
+- `citations` 是本次回答引用的资料片段（P3.3）：`citation` 由 Java 工具拼好，`documentId`/`seq`
+  供前端跳转 `/library?doc={id}&chunk={seq}`（资料页用完即从地址栏抹掉参数，不是可分享链接）。
+  回答引用了其中几条就列几条；一条都没对上（规则模式）时列全部命中。
+  没调资料工具时为空列表。
 - 请求体 `question` 为空或超 500 字返回 `400 VALIDATION_ERROR`。
 - Python 未启动 / 超时返回 `503 DATA_SOURCE_UNAVAILABLE`，错误信息直接给出启动命令。
 
@@ -862,7 +878,7 @@ AI 服务与模型配置状态，供「AI 配置」页显示：`{available, agen
 | `mode` | `llm` 或 `rule_based`；拒绝生成时为空 |
 | `tools` | `工具名:ok/fail` 列表；告警解释为 `-`（数据由 Java 组装，不经工具） |
 | `usage` | `promptTokens+completionTokens`，未知写 `-` |
-| `err` | 模型侧错误码（`MODEL_TIMEOUT` / `MODEL_ERROR` / `MODEL_OUTPUT_INVALID`）或业务码（如 `NO_DATA`） |
+| `err` | 模型侧错误码（`MODEL_TIMEOUT` / `MODEL_ERROR` / `MODEL_OUTPUT_INVALID`）或业务码（如 `NO_DATA` / `TOOL_FAILED`） |
 | `errText` | 截断到 120 字符、压成一行的错误说明 |
 
 **不记** API Key、prompt 原文、回答正文。失败与拒绝生成也要写一条，否则"用户说点了没反应"时无从查起。

@@ -27,12 +27,22 @@ export interface AssistantUsage {
   completionTokens: number | null
 }
 
+/** 资料引用（P3.3）：citation 由后端拼好，documentId/seq 用来跳回原文那一段。 */
+export interface AssistantCitation {
+  chunkId: number
+  documentId: number
+  title: string
+  seq: number
+  citation: string
+}
+
 export interface AssistantReply {
   question: string
   /** llm = 模型生成；rule_based = 规则汇总（未配置模型或模型失败） */
   mode: 'llm' | 'rule_based'
   answer: AssistantAnswer
   toolCalls: AssistantToolCall[]
+  citations?: AssistantCitation[]
   dataAsOf: string | null
   generatedAt: string
   model: string | null

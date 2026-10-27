@@ -6,6 +6,7 @@ import com.stockcat.domain.MarketRecap;
 import com.stockcat.mapper.AlertEventMapper;
 import com.stockcat.web.dto.AgentToolDtos.*;
 import com.stockcat.web.dto.AgentToolResponse;
+import com.stockcat.web.dto.LibraryDtos;
 import com.stockcat.web.dto.PageResponse;
 import com.stockcat.web.dto.PositionResponse;
 import com.stockcat.web.dto.QuoteResponse;
@@ -39,6 +40,7 @@ public class AgentToolService {
     private static final int MAX_ALERT_LIMIT = 50;
     private static final int DEFAULT_RECAP_LIMIT = 5;
     private static final int DEFAULT_DIARY_LIMIT = 5;
+    private static final int DEFAULT_LIBRARY_LIMIT = 5;
     private static final int MAX_SMALL_LIMIT = 20;
     private static final ZoneId CN = ZoneId.of("Asia/Shanghai");
 
@@ -55,16 +57,19 @@ public class AgentToolService {
     private final IndexService indexService;
     private final RecapService recapService;
     private final DiaryService diaryService;
+    private final LibraryService libraryService;
 
     public AgentToolService(WatchlistService watchlistService, PositionService positionService,
                             AlertEventMapper alertEventMapper, IndexService indexService,
-                            RecapService recapService, DiaryService diaryService) {
+                            RecapService recapService, DiaryService diaryService,
+                            LibraryService libraryService) {
         this.watchlistService = watchlistService;
         this.positionService = positionService;
         this.alertEventMapper = alertEventMapper;
         this.indexService = indexService;
         this.recapService = recapService;
         this.diaryService = diaryService;
+        this.libraryService = libraryService;
     }
 
     // ------------------------------------------------------------------ 自选行情
@@ -292,6 +297,56 @@ public class AgentToolService {
         }
         List<String> missing = hits.isEmpty() ? List.of("未命中任何日记（关键词：" + trimmed + "）") : List.of();
         return AgentToolResponse.of("diary-search", null, new DiarySearch(trimmed, hits.size(), hits), missing);
+    }
+
+    // ------------------------------------------------------------------ 资料检索
+
+    /**
+     * 资料库片段检索（P3.3）：命中单位是**片段**，不是整篇。
+     *
+     * <p>两个刻意的设计：
+     * <ul>
+     *   <li>每条命中都带 {@code citation}（{@code 《标题》· 第 N 段}），由这里按真实的
+     *       {@code seq} 拼装。模型只能引用这串现成字符，不能自述出处——否则换了检索方式，
+     *       引用就和原文对不上了。</li>
+     *   <li>没命中时进 {@code missing} 并区分「库里一篇都没有」与「有资料但没命中」：
+     *       前者模型该直说"资料库是空的"，后者该说"没有找到相关的"；两种都不是"用模型知识补一个答案"。</li>
+     * </ul>
+     */
+    public AgentToolResponse<LibrarySearch> librarySearch(String keyword, int limit) {
+        if (keyword == null || keyword.isBlank()) {
+            throw ApiException.validationError("keyword 必填：资料检索不接受空关键词");
+        }
+        String trimmed = keyword.trim();
+        int effective = clamp(limit <= 0 ? DEFAULT_LIBRARY_LIMIT : limit, 1, MAX_SMALL_LIMIT);
+
+        LibraryDtos.SearchResult result = libraryService.search(trimmed, effective, null);
+        List<LibraryHit> hits = new ArrayList<>(result.hits().size());
+        OffsetDateTime dataAsOf = null;
+        for (LibraryDtos.SearchHit hit : result.hits()) {
+            hits.add(new LibraryHit(
+                    hit.chunkId(), hit.documentId(), hit.documentTitle(), hit.seq(), hit.heading(),
+                    hit.snippet(), hit.sourceType(), hit.publisher(), hit.publishedAt(),
+                    citation(hit.documentTitle(), hit.seq())));
+            if (hit.importedAt() != null && (dataAsOf == null || hit.importedAt().isAfter(dataAsOf))) {
+                dataAsOf = hit.importedAt();
+            }
+        }
+
+        List<String> missing = List.of();
+        if (hits.isEmpty()) {
+            long total = libraryService.list(null, 1, 1).total();
+            missing = List.of(total == 0
+                    ? "资料库里还没有任何资料，无法回答与该主题相关的问题"
+                    : "资料库共有 " + total + " 篇资料，但没有命中「" + trimmed + "」的片段");
+        }
+        return AgentToolResponse.of("library-search", dataAsOf,
+                new LibrarySearch(trimmed, hits.size(), hits), missing);
+    }
+
+    /** 引用格式只在这一处定义：前端展示、模型 prompt、校验白名单都用它，避免三处各写一份。 */
+    static String citation(String title, Integer seq) {
+        return "《" + (title == null ? "无标题" : title) + "》· 第 " + (seq == null ? 1 : seq) + " 段";
     }
 
     // ------------------------------------------------------------------ 内部

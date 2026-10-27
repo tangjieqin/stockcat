@@ -8,6 +8,7 @@ import com.stockcat.mapper.AlertEventMapper;
 import com.stockcat.web.dto.AgentToolDtos.*;
 import com.stockcat.web.dto.AgentToolResponse;
 import com.stockcat.web.dto.InstrumentResponse;
+import com.stockcat.web.dto.LibraryDtos;
 import com.stockcat.web.dto.PageResponse;
 import com.stockcat.web.dto.PositionResponse;
 import com.stockcat.web.dto.QuoteResponse;
@@ -23,6 +24,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -44,6 +46,7 @@ class AgentToolServiceTest {
     private IndexService indexService;
     private RecapService recapService;
     private DiaryService diaryService;
+    private LibraryService libraryService;
     private AgentToolService service;
 
     @BeforeEach
@@ -54,8 +57,9 @@ class AgentToolServiceTest {
         indexService = mock(IndexService.class);
         recapService = mock(RecapService.class);
         diaryService = mock(DiaryService.class);
+        libraryService = mock(LibraryService.class);
         service = new AgentToolService(watchlistService, positionService, alertEventMapper,
-                indexService, recapService, diaryService);
+                indexService, recapService, diaryService, libraryService);
     }
 
     // ------------------------------------------------------------------ 自选行情
@@ -281,6 +285,71 @@ class AgentToolServiceTest {
         assertThat(resp.missing()).anyMatch(m -> m.contains("未命中"));
     }
 
+    // ------------------------------------------------------------------ 资料检索（P3.3）
+
+    @Test
+    void librarySearchRejectsBlankKeyword() {
+        assertThatThrownBy(() -> service.librarySearch(" ", 5))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("keyword 必填");
+    }
+
+    @Test
+    void librarySearchBuildsCitationFromRealSeqAndUsesImportTimeAsDataAsOf() {
+        when(libraryService.search(eq("渠道库存"), anyInt(), eq(null))).thenReturn(
+                new LibraryDtos.SearchResult("渠道库存", List.of("渠道库存"), List.of(
+                        libraryHit(11L, 3L, "白酒渠道调研纪要", 2, "批价",
+                                "主力产品一批价在国庆后回落约 30 元",
+                                OffsetDateTime.parse("2026-09-25T02:00:00Z")),
+                        libraryHit(9L, 3L, "白酒渠道调研纪要", 1, "渠道跟踪",
+                                "渠道库存周转天数从 42 天降至 35 天",
+                                OffsetDateTime.parse("2026-09-21T02:00:00Z")))));
+
+        AgentToolResponse<LibrarySearch> resp = service.librarySearch("渠道库存", 5);
+
+        assertThat(resp.data().count()).isEqualTo(2);
+        // 引用必须是服务端按 seq 拼的：第 2 段就是第 2 段，不由模型自述
+        assertThat(resp.data().hits().get(0).citation()).isEqualTo("《白酒渠道调研纪要》· 第 2 段");
+        assertThat(resp.data().hits().get(1).citation()).isEqualTo("《白酒渠道调研纪要》· 第 1 段");
+        assertThat(resp.data().hits().get(0).title()).isEqualTo("白酒渠道调研纪要");
+        assertThat(resp.dataAsOf()).isEqualTo(OffsetDateTime.parse("2026-09-25T02:00:00Z"));
+        assertThat(resp.missing()).isEmpty();
+    }
+
+    @Test
+    void librarySearchNoHitSaysLibraryIsEmpty() {
+        when(libraryService.search(eq("渠道库存"), anyInt(), eq(null)))
+                .thenReturn(new LibraryDtos.SearchResult("渠道库存", List.of(), List.of()));
+        when(libraryService.list(null, 1, 1)).thenReturn(new LibraryDtos.PageResult(0, 1, 1, List.of()));
+
+        AgentToolResponse<LibrarySearch> resp = service.librarySearch("渠道库存", 5);
+
+        assertThat(resp.data().hits()).isEmpty();
+        assertThat(resp.missing()).anyMatch(m -> m.contains("还没有任何资料"));
+    }
+
+    @Test
+    void librarySearchNoHitButLibraryNotEmptySaysNoMatch() {
+        when(libraryService.search(eq("光伏"), anyInt(), eq(null)))
+                .thenReturn(new LibraryDtos.SearchResult("光伏", List.of(), List.of()));
+        when(libraryService.list(null, 1, 1)).thenReturn(new LibraryDtos.PageResult(12, 1, 1, List.of()));
+
+        AgentToolResponse<LibrarySearch> resp = service.librarySearch("光伏", 5);
+
+        assertThat(resp.missing()).anyMatch(m -> m.contains("12 篇") && m.contains("光伏"));
+    }
+
+    @Test
+    void librarySearchClampsLimit() {
+        when(libraryService.search(any(), anyInt(), any()))
+                .thenReturn(new LibraryDtos.SearchResult("x", List.of(), List.of()));
+        when(libraryService.list(null, 1, 1)).thenReturn(new LibraryDtos.PageResult(0, 1, 1, List.of()));
+
+        service.librarySearch("x", 999);
+
+        verify(libraryService).search("x", 20, null); // MAX_SMALL_LIMIT
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     private static WatchlistItemResponse watchItem(long id, String symbol, String name,
@@ -334,5 +403,13 @@ class AgentToolServiceTest {
         r.setContent(content);
         r.setUpdatedAt(updatedAt);
         return r;
+    }
+
+    private static LibraryDtos.SearchHit libraryHit(long chunkId, long documentId, String title,
+                                                    int seq, String heading, String snippet,
+                                                    OffsetDateTime importedAt) {
+        return new LibraryDtos.SearchHit(chunkId, documentId, title, seq, heading, snippet,
+                0, snippet.length(), "PASTE", null, "某券商",
+                LocalDate.parse("2026-09-20"), importedAt, 6, List.of("渠道库存"), false);
     }
 }

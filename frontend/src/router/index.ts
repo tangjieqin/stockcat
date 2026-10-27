@@ -34,6 +34,9 @@ const router = createRouter({
         { path: 'recap/market', name: 'market-recap', component: () => import('../views/MarketRecapView.vue'), meta: { title: '市场复盘' } },
         { path: 'recap/diary', name: 'my-diary', component: () => import('../views/DiaryView.vue'), meta: { title: '我的日记' } },
 
+        // 资料（P3）：外部资料的导入与检索，与「我的日记」分开——一个是我写的，一个是别人写的
+        { path: 'library', name: 'library', component: () => import('../views/LibraryView.vue'), meta: { title: '资料库' } },
+
         // 其他
         { path: 'settings/data-source', name: 'data-source', component: () => import('../views/DataSourceView.vue'), meta: { title: '数据源' } },
         { path: 'settings/notification', name: 'notification', component: () => import('../views/NotificationView.vue'), meta: { title: '通知配置' } },

@@ -59,4 +59,11 @@ public class AgentToolController {
                                                       @RequestParam(defaultValue = "5") int limit) {
         return service.diarySearch(keyword, limit);
     }
+
+    /** 资料库片段检索（P3.3）：命中片段带 citation，模型只能引用服务端拼好的出处。 */
+    @GetMapping("/library/search")
+    public AgentToolResponse<LibrarySearch> librarySearch(@RequestParam String keyword,
+                                                          @RequestParam(defaultValue = "5") int limit) {
+        return service.librarySearch(keyword, limit);
+    }
 }

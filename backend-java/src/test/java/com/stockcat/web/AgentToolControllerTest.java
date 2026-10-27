@@ -19,7 +19,7 @@ class AgentToolControllerTest {
 
     private static final Set<String> WHITELIST = Set.of(
             "/watchlist-quotes", "/positions", "/alert-events",
-            "/market-brief", "/recaps", "/diary/search");
+            "/market-brief", "/recaps", "/diary/search", "/library/search");
 
     @Test
     void basePathIsTheAgentToolsPrefix() {

@@ -100,11 +100,24 @@ class AgentUsage(CamelModel):
     completion_tokens: int | None = None
 
 
+class AgentCitation(CamelModel):
+    """一条资料引用。``citation`` 是后端拼好的「《标题》· 第 N 段」，前端不重新拼。"""
+
+    chunk_id: int
+    document_id: int
+    title: str
+    seq: int
+    citation: str
+
+
 class AgentAskResponse(CamelModel):
     question: str
     mode: str = Field(description="llm = 模型生成；rule_based = 规则汇总（未配置模型或模型失败）")
     answer: AgentAnswer
     tool_calls: list[AgentToolCall]
+    citations: list[AgentCitation] = Field(
+        default_factory=list,
+        description="资料库引用（P3.3）。chunkId/documentId/seq 由 Java 工具返回，前端据此跳原文")
     data_as_of: str | None = Field(default=None, description="整段回答的数据截至时间")
     generated_at: str
     model: str | None = None

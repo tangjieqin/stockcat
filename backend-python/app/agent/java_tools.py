@@ -27,6 +27,7 @@ TOOL_WHITELIST: dict[str, tuple[str, tuple[str, ...]]] = {
     "market-brief": ("/market-brief", ("date",)),
     "recaps": ("/recaps", ("from", "to", "limit")),
     "diary-search": ("/diary/search", ("keyword", "limit")),
+    "library-search": ("/library/search", ("keyword", "limit")),
 }
 
 _client: httpx.Client | None = None

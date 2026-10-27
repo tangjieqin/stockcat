@@ -35,6 +35,22 @@ _DIARY_NOISE = (
     "吗", "呢", "？", "?", "，", ",", "。", " ",
 )
 
+# 资料意图：提到这些东西时去资料库检索（P3.3）。P3 只支持手工导入的资料，
+# 所以"新闻""公告"命中不代表有这类数据——没命中会由工具如实说明库里没有。
+_LIBRARY_TRIGGERS = ("资料", "研报", "公告", "新闻", "调研纪要", "文档", "材料")
+
+_LIBRARY_NOISE = (
+    "我存的资料", "存的资料", "资料库里", "资料库", "资料里", "资料", "研报", "公告",
+    "新闻", "调研纪要", "文档", "材料", "这些", "那篇", "这篇", "那个", "这个",
+    "里面", "里的", "关于", "有没有", "怎么说的", "怎么说", "提到的", "提到",
+    "讲过", "讲的", "帮我", "看看", "看一下", "找一下", "查一下", "搜索",
+    "我的", "我存的", "我", "里", "吗", "呢", "？", "?", "，", ",", "。", "！", "!", " ",
+)
+
+# 剥完噪声只剩这些词时，说明用户没说"关于什么"：不要拿它去搜，搜了也只是噪声
+_EMPTY_WORDS = {"什么", "哪些", "怎么", "如何", "多少", "是否", "东西", "内容"}
+_EDGE_CHARS = "的了是有吗呢里都就还也"
+
 
 def plan(question: str) -> list[tuple[str, dict]]:
     """返回 [(工具名, 参数), ...]。"""
@@ -53,6 +69,12 @@ def plan(question: str) -> list[tuple[str, dict]]:
             planned.append(("diary-search", {"keyword": keyword, "limit": 3}))
             seen.add("diary-search")
 
+    if any(trigger in text for trigger in _LIBRARY_TRIGGERS):
+        keyword = library_keyword(text)
+        if keyword and "library-search" not in seen:
+            planned.append(("library-search", {"keyword": keyword, "limit": 5}))
+            seen.add("library-search")
+
     if not planned:
         planned = [(tool, dict(params)) for tool, params in DEFAULT_TOOLS]
 
@@ -66,4 +88,18 @@ def diary_keyword(question: str) -> str | None:
         text = text.replace(noise, " ")
     words = [w.strip("的了是有吗呢") for w in re.split(r"\s+", text)]
     words = [w for w in words if len(w) >= 2]
+    return words[0] if words else None
+
+
+def library_keyword(question: str) -> str | None:
+    """从"我存的资料里关于渠道库存怎么说"里剥出"渠道库存"。
+
+    剥不出就返回 None——**不拿整句去检索**：整句里的"我""怎么"会和很多片段撞上，
+    结果看起来有命中，实际全是噪声，比明确说"不知道查什么"更糟。
+    """
+    text = question or ""
+    for noise in _LIBRARY_NOISE:
+        text = text.replace(noise, " ")
+    words = [w.strip(_EDGE_CHARS) for w in re.split(r"\s+", text)]
+    words = [w for w in words if len(w) >= 2 and w not in _EMPTY_WORDS]
     return words[0] if words else None

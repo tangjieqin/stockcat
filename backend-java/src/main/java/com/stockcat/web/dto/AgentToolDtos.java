@@ -131,4 +131,27 @@ public class AgentToolDtos {
 
     public record DiarySearch(String keyword, int count, List<DiaryHit> hits) {
     }
+
+    /**
+     * 资料库命中的**片段**（P3.3）。
+     *
+     * <p>{@code citation} 由服务端按 {@code chunkId} 拼装，格式固定为
+     * {@code 《标题》· 第 N 段}。模型只允许引用这一串字符：它拿不到"自己编一个出处"的空间，
+     * 也拼不出正文里不存在的第 N 段——{@code seq} 与 {@code charStart/charEnd} 都是切片时落库的真实值。
+     */
+    public record LibraryHit(
+            Long chunkId,
+            Long documentId,
+            String title,
+            Integer seq,
+            String heading,
+            String snippet,
+            String sourceType,
+            String publisher,
+            LocalDate publishedAt,
+            String citation) {
+    }
+
+    public record LibrarySearch(String keyword, int count, List<LibraryHit> hits) {
+    }
 }

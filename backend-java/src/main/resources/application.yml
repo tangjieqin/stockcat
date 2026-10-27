@@ -6,6 +6,11 @@ spring:
   # 需要覆盖时用启动参数：--spring.profiles.active=xxx
   profiles:
     active: local
+  servlet:
+    multipart:
+      # 资料导入：单篇正文上限 20 万字（约 600KB UTF-8 中文），留出余量
+      max-file-size: 5MB
+      max-request-size: 10MB
 
 server:
   port: 8081

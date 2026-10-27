@@ -43,6 +43,12 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
     ],
   },
   {
+    label: '资料',
+    items: [
+      { label: '资料库', to: '/library' },
+    ],
+  },
+  {
     label: '其他',
     items: [
       { label: '数据源', to: '/settings/data-source' },

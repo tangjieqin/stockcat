@@ -25,6 +25,7 @@ const SUGGESTIONS = [
   '今天我的持仓发生了什么变化？',
   '最近哪些告警值得关注？',
   '根据现有数据说说市场情况。',
+  '我存的资料里关于渠道库存怎么说？',
 ]
 
 const STORAGE_KEY = 'stockcat.assistant.sessions.v1'
@@ -236,7 +237,7 @@ async function scrollToBottom() {
               </button>
             </div>
             <p class="hint">
-              数据来源：Java 只读工具（持仓 / 行情 / 告警 / 复盘）；不提供买卖建议。
+              数据来源：Java 只读工具（持仓 / 行情 / 告警 / 复盘 / 资料库）；不提供买卖建议。
             </p>
           </div>
 
@@ -269,6 +270,23 @@ async function scrollToBottom() {
                   <ul>
                     <li v-for="(ev, k) in replyOf(m)!.answer.evidence" :key="k">{{ ev }}</li>
                   </ul>
+                </div>
+
+                <!-- 引用由后端按 chunkId 拼装：点一下回到资料原文那一段，不靠模型自述出处 -->
+                <div v-if="replyOf(m)!.citations?.length" class="section">
+                  <div class="section-title">
+                    资料引用（{{ replyOf(m)!.citations!.length }} 段）
+                  </div>
+                  <div class="citations">
+                    <RouterLink
+                      v-for="c in replyOf(m)!.citations"
+                      :key="c.chunkId"
+                      class="cite"
+                      :to="`/library?doc=${c.documentId}&chunk=${c.seq}`"
+                    >
+                      {{ c.citation }}
+                    </RouterLink>
+                  </div>
                 </div>
 
                 <details class="section tools">
@@ -475,6 +493,24 @@ async function scrollToBottom() {
   color: var(--text-secondary);
   font-weight: 600;
   margin-bottom: 4px;
+}
+.citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cite {
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  background: var(--bg-subtle, transparent);
+}
+.cite:hover {
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
 }
 .answer p {
   margin: 0;
