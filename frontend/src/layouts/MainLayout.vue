@@ -54,7 +54,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
       { label: '数据源', to: '/settings/data-source' },
       { label: '通知配置', to: '/settings/notification' },
       { label: '系统状态', to: '/settings/status' },
-      { label: '备份', to: '/settings/backup', phase: 'P4' },
+      { label: '备份', to: '/settings/backup' },
       { label: 'AI 配置', to: '/settings/ai' },
     ],
   },

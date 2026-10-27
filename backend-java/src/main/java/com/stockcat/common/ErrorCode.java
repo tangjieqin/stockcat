@@ -10,6 +10,8 @@ public enum ErrorCode {
     CONFLICT("CONFLICT", 409),
     DATA_SOURCE_UNAVAILABLE("DATA_SOURCE_UNAVAILABLE", 503),
     STALE_DATA("STALE_DATA", 503),
+    /** 备份依赖的外部工具（docker / pg_dump）不可用，或用它导出时失败。 */
+    BACKUP_UNAVAILABLE("BACKUP_UNAVAILABLE", 503),
     INTERNAL_ERROR("INTERNAL_ERROR", 500);
 
     private final String code;

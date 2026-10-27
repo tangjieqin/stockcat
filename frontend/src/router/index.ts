@@ -41,7 +41,7 @@ const router = createRouter({
         { path: 'settings/data-source', name: 'data-source', component: () => import('../views/DataSourceView.vue'), meta: { title: '数据源' } },
         { path: 'settings/notification', name: 'notification', component: () => import('../views/NotificationView.vue'), meta: { title: '通知配置' } },
         { path: 'settings/status', name: 'system-status', component: () => import('../views/SystemStatusView.vue'), meta: { title: '系统状态' } },
-        { path: 'settings/backup', name: 'backup', component: () => import('../views/PlaceholderView.vue'), meta: { title: '备份', phase: 'P4' } },
+        { path: 'settings/backup', name: 'backup', component: () => import('../views/BackupView.vue'), meta: { title: '备份' } },
         { path: 'settings/ai', name: 'ai-config', component: () => import('../views/AiConfigView.vue'), meta: { title: 'AI 配置' } },
       ],
     },

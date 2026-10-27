@@ -68,6 +68,17 @@ stockcat:
       # 桌面端不常开：启动时补跑一次，已是最新快照日则跳过
       on-startup: true
 
+  # 备份（P4 前置）：pg_dump -Fc 导出到本地目录，恢复只能走命令行（DATABASE.md §7）
+  backup:
+    # spring-boot:run 的工作目录是 backend-java（Maven 的 basedir），所以用 ../backups
+    # 让文件落在项目根，与 .gitignore 的约定一致；换成绝对路径也可（接口返回绝对路径供页面显示）
+    dir: ${STOCKCAT_BACKUP_DIR:../backups}
+    # 宿主机没装 pg_dump 时，借用 docker compose 起的容器里那个
+    docker-container: ${STOCKCAT_DB_CONTAINER:stockcat-postgres}
+    # 装了本机 PostgreSQL 客户端就填完整路径（如 C:/Program Files/PostgreSQL/16/bin/pg_dump.exe），
+    # 留空 = 走 docker exec
+    pg-dump: ${STOCKCAT_PG_DUMP:}
+
 mybatis:
   # Mapper XML 位置（P0.2 起补充）
   mapper-locations: classpath:mapper/**/*.xml

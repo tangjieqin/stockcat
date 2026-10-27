@@ -889,3 +889,79 @@ AI 服务与模型配置状态，供「AI 配置」页显示：`{available, agen
 - 字段改名、语义变化或删除属于破坏性变更，需要更新文档、前端类型和测试。
 - 新增可选字段优先保持向后兼容。
 - 每个接口至少有一个成功测试和关键错误测试。
+
+---
+
+## 13. 数据库备份（2026-10-27，P4 前置小件）
+
+只做导出与文件管理。**恢复不在 API 层提供**：`pg_restore` 灌回已有库会撞主键，或需要先清空
+整个 schema，一次误点就没了全部流水——这一步只能走命令行，见 `DATABASE.md §7`。
+
+### `GET /backup`
+
+返回导出方式与已有文件：
+
+```json
+{
+  "dir": "D://Code//stockcat//backups",
+  "method": "docker exec stockcat-postgres pg_dump -Fc -U stockcat -d stockcat",
+  "restoreCommand": "docker exec -i stockcat-postgres pg_restore --clean --if-exists -U stockcat -d stockcat < <备份文件完整路径>",
+  "usesDocker": true,
+  "files": [
+    {"name": "stockcat-20261027-215709.dump", "sizeBytes": 209508,
+     "createdAt": "2026-10-27T13:57:09.768Z"}
+  ]
+}
+```
+
+- `dir` 是**绝对路径**：相对路径在 IDE 与命令行下指向不同地方，页面直接显示文件落在哪。
+- `method` 是当前实际会执行的命令，便于排查"为什么导不出来"；**不含口令**——容器内走
+  unix socket（trust），本机 pg_dump 走 `PGPASSWORD` 环境变量，不进命令行参数。
+- `restoreCommand` 由后端拼（而不是前端写死），因为它和导出共用同一份容器名/库名配置；
+  文件路径留成占位符，由用户替换。
+- `files` 按时间倒序，只认 `stockcat-YYYYMMDD-HHmmss(-N).dump`，目录里的其他文件不出现。
+  **备份历史不建表**：把"有哪些备份"记在数据库里，等于把钥匙锁在要救的那间屋子里。
+
+### `POST /backup/export`
+
+同步执行一次导出，返回新文件记录。实现要点：
+
+- 先写 `.part` 临时文件，`pg_dump` 退出码 0 且输出非空后才改名成正式文件——
+  **失败不留半截 dump**。半截文件比没有更危险：真到要恢复那天才发现打不开。
+- 同一秒内点两次，第二份加 `-2` 后缀，不覆盖已有备份。
+- 超时 5 分钟；个人库实测 0.5 秒完成（约 20 万字节）。
+
+### `GET /backup/{name}/download`
+
+`application/octet-stream` 下载。`name` 必须匹配文件名正则，**非法名字一律 404**
+（不提示"格式不对"，避免变成探测工具），另有目录归一化双重校验。
+实测 `..%2F.env`、`../../../.env` 均被拒绝（400/404），`.env` 内容不出现在响应里。
+
+### `DELETE /backup/{name}`
+
+删除单个备份文件，返回 204。删的是备份文件本身，不影响数据库内容。
+
+### 错误
+
+依赖不可用（docker 没装、容器没起、pg_dump 路径配错、认证失败）返回
+`503 BACKUP_UNAVAILABLE`，`message` 里写下一步该做什么：
+
+| 场景 | message 要点 |
+|---|---|
+| 找不到 docker 命令 | 两个解决方式：启动 Docker Desktop；或装本机 pg_dump 并配 `stockcat.backup.pg-dump` |
+| 容器不存在 | "容器 X 不存在或未运行。先执行 docker compose up -d"（附 pg_dump 原始输出） |
+| Docker 守护进程没起 | "连不上 Docker 守护进程，请确认 Docker Desktop 已启动" |
+| pg_dump 路径配错 | "找不到可执行的 X。请检查配置项 stockcat.backup.pg-dump" |
+| 认证失败（仅本机模式） | 提示检查 `.env` 的 `STOCKCAT_DB_PASSWORD` |
+
+三种场景均已实测（正常导出、容器不存在、路径配错）。
+
+### 配置
+
+```yaml
+stockcat:
+  backup:
+    dir: ${STOCKCAT_BACKUP_DIR:../backups}        # spring-boot:run 的工作目录是 backend-java，../ 落到项目根
+    docker-container: ${STOCKCAT_DB_CONTAINER:stockcat-postgres}
+    pg-dump: ${STOCKCAT_PG_DUMP:}                  # 填本机 pg_dump 完整路径则走本机，留空走 docker exec
+```
