@@ -12,6 +12,7 @@ import com.stockcat.mapper.KlineDailyMapper;
 import com.stockcat.mapper.MonitorTargetMapper;
 import com.stockcat.mapper.WatchlistMapper;
 import com.stockcat.quote.SymbolMapping;
+import com.stockcat.system.JobRunStats;
 import com.stockcat.web.dto.KlineSyncBatchSummary;
 import com.stockcat.web.dto.KlineSyncSummary;
 import org.slf4j.Logger;
@@ -58,6 +59,7 @@ public class KlineSyncService {
     private final WatchlistMapper watchlistMapper;
     private final MonitorTargetMapper monitorTargetMapper;
     private final PositionService positionService;
+    private final JobRunStats jobStats;
     private final LocalTime closeTime;
 
     public KlineSyncService(KlineDailyMapper klineMapper,
@@ -67,6 +69,7 @@ public class KlineSyncService {
                             WatchlistMapper watchlistMapper,
                             MonitorTargetMapper monitorTargetMapper,
                             PositionService positionService,
+                            JobRunStats jobStats,
                             @Value("${stockcat.history.close-time:15:05}") String closeTime) {
         this.klineMapper = klineMapper;
         this.historyClient = historyClient;
@@ -75,6 +78,7 @@ public class KlineSyncService {
         this.watchlistMapper = watchlistMapper;
         this.monitorTargetMapper = monitorTargetMapper;
         this.positionService = positionService;
+        this.jobStats = jobStats;
         this.closeTime = LocalTime.parse(closeTime);
     }
 
@@ -159,6 +163,15 @@ public class KlineSyncService {
         long cost = elapsed(start);
         log.info("历史同步完成：标的 {} 成功 {} 失败 {} 跳过 {}，耗时 {}ms",
                 ids.size(), succeeded, failed, skipped, cost);
+        String text = "标的 %d 成功 %d 失败 %d 跳过 %d".formatted(ids.size(), succeeded, failed, skipped);
+        // 统计记在 service 而不是定时器里：手动触发（POST /history/sync）同样要反映到系统状态页，
+        // 否则"刚点过同步，页面还写着未运行"，用户只会以为按钮没生效。
+        // 全部失败不记成功——那是最容易被忽略的坏状态。
+        if (succeeded == 0 && failed > 0) {
+            jobStats.recordFailure(JobRunStats.HISTORY_SYNC, text);
+        } else {
+            jobStats.recordSuccess(JobRunStats.HISTORY_SYNC, text);
+        }
         return new KlineSyncBatchSummary(ids.size(), succeeded, failed, skipped, cost, results);
     }
 

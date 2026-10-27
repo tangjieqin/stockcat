@@ -616,7 +616,27 @@ AI 解释一条已触发的事件（P2 场景二）。**只读**：不写库、�
     "status": "UP",
     "baseUrl": "http://127.0.0.1:8100",
     "agent": {"status": "UP", "modelConfigured": true, "model": "gpt-4o-mini", "toolCount": 6}
-  }
+  },
+  "jobs": {
+    "history-sync": {"status": "UP", "lastAttemptAt": "2026-10-27T07:35:02Z", "lastSuccessAt": "2026-10-27T07:35:02Z",
+                     "lastError": null, "consecutiveFailures": 0, "summary": "标的 3 成功 3 失败 0 跳过 0",
+                     "attempts": 1, "successes": 1},
+    "fund-nav-sync": {"status": "UNKNOWN", "lastAttemptAt": null, "lastSuccessAt": null, "lastError": null,
+                      "consecutiveFailures": 0, "summary": null, "attempts": 0, "successes": 0},
+    "position-snapshot": {"status": "UP", "summary": "2026-09-27~2026-10-27 交易日 20 行 41 提示 0"},
+    "indicator-alert": {"status": "FAILED", "lastError": "K 线不足", "consecutiveFailures": 1}
+  },
+  "dataSources": [
+    {"key": "quote", "name": "实时行情", "provider": "东方财富 push2",
+     "baseUrl": "https://push2.eastmoney.com", "enabled": true,
+     "schedule": "交易时段每 15 秒", "cron": null,
+     "note": "自选、监控标的与指数的现价；未开市或超时按 STALE 标注，缺失字段一律 null。",
+     "stats": {"status": "UP", "lastSuccessAt": "2026-10-27T07:59:45Z", "lastError": null,
+               "consecutiveFailures": 0, "summary": "成功 120 次、失败 3 只次"}},
+    {"key": "fund-quote", "name": "基金 IOPV", "provider": "腾讯行情", "baseUrl": "https://qt.gtimg.cn",
+     "enabled": true, "schedule": "随实时行情采集", "cron": null,
+     "note": "ETF 的盘中参考净值；LOF 没有 IOPV，只能等当晚净值。本项无独立运行统计。", "stats": null}
+  ]
 }
 ```
 
@@ -626,6 +646,15 @@ AI 解释一条已触发的事件（P2 场景二）。**只读**：不写库、�
   因为"AI 没开"是正常状态，不是系统故障。
 - `agent` 只报"配没配模型、几个工具"，不搬整个白名单（要看清单用 `/assistant/status` 或 §10）。
 - 探活最多多等 3s；行情采集与告警在别的线程，不受影响。
+
+`jobs` 是收盘后四个任务的**内存态**统计（`JobRunStats`）：
+
+- `status` 三态：`UP`（上次成功）/ `FAILED`（最近一次失败，带 `lastError` 与连续失败次数）/ `UNKNOWN`（本进程启动后没跑过）；
+- **Java 重启后清零**，页面上也写明这一点——把 UNKNOWN 当故障排查是常见误会；
+- 失败不擦除 `lastSuccessAt`，那个时间是历史事实。
+
+`dataSources` 供「数据源」页使用，`stats` 与 `jobs` 同结构，**没有独立统计的源写 `null`**
+（例如 IOPV 随实时采集执行，不单独立项），前端显示"—"而不是编一个"正常"。
 
 不要在该接口返回密码、token、环境变量值或堆栈。
 

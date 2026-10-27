@@ -121,8 +121,8 @@ STOCKCAT_LLM_API_KEY=sk-...
 | 指标规则（MACD/KDJ/RSI）没提醒 | 指标规则只在收盘后 15:40 按日线评估，且是"穿越"语义——已在金叉状态不会补发；当天已提醒过会被去重；K 线不够也不会触发。执行 `POST /api/v1/alert-rules/indicator/evaluate` 可看到每条规则的具体状态 |
 | 收益曲线是空的 | 快照每天 15:45 生成，也可点「重建快照」；重建会先补齐**不复权**日线，所以需要 Python（8100）在线，否则该标的市值留空、页面提示"缺收盘价" |
 | 溢价规则建不了 | `PREMIUM_*` 只对 ETF/LOF 开放（股票没有 IOPV/单位净值）；LOF 的净值超过 3 天未更新时也不会判定，避免拿过期净值当实时溢价 |
-| 卖出被拒 409 | 卖出数量超过当时持有量，message 里有当前可卖数量 |
-| 删除交易流水 409 | 删除该买入会使其后的卖出在重放时超卖，属数据保护 |
+| 系统状态页显示任务「未运行」 | 任务统计是内存态，Java 重启后清零，跑到点一次才有数据；也可手动触发（`POST /api/v1/history/sync`、`POST /api/v1/portfolio/snapshots/rebuild`）。数据源页同一处查看 |
+| 卖出被拒 409 | 卖出数量超过当时持有量，message 里有当前可卖数量 || 删除交易流水 409 | 删除该买入会使其后的卖出在重放时超卖，属数据保护 |
 | IDEA 运行报 `sqlSessionFactory or sqlSessionTemplate required` | 运行配置里不要额外设置 `--spring.profiles.active=default`；P0.2 起数据库是硬依赖，默认 profile 已是 local（连接 PostgreSQL） |
 
 ## 当前进度
@@ -145,3 +145,5 @@ STOCKCAT_LLM_API_KEY=sk-...
 - ✅ P1.4 基金净值/IOPV 与溢价（腾讯 IOPV 实时 + 天天基金净值带日期；溢价查询层现算并标注基准与滞后天数；自选溢价列 + 详情基金区块；+ 108 个 Java 单测、44 个 pytest）
 - ✅ P1.5 收益曲线与持仓变化 + 溢价告警（每日持仓快照由流水重放 + 不复权收盘价生成、可整段重建；`/portfolio/*` 三个接口；持仓页三页签；`PREMIUM_ABOVE/BELOW` 盘中评估、仅 ETF/LOF；+ 129 个 Java 单测）
 
+- ✅ P2 AI 复盘 Agent（6 个只读工具 + 问答/告警解释/复盘草稿三场景 + 草稿 `AI_DRAFT→MANUAL` 确认 + 单行运行日志 + AI 配置页；Python 96 / Java 173 测试）
+- ✅ P0 收尾：数据源页与系统状态页（`/system/status` 扩出 `jobs` 与 `dataSources`，四个收盘任务记运行统计；+ 191 个 Java 单测）

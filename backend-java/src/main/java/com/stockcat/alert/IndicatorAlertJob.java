@@ -2,6 +2,7 @@ package com.stockcat.alert;
 
 import com.stockcat.service.IndicatorAlertService;
 import com.stockcat.service.TradingCalendarService;
+import com.stockcat.system.JobRunStats;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,15 +31,18 @@ public class IndicatorAlertJob {
 
     private final IndicatorAlertService indicatorAlertService;
     private final TradingCalendarService calendarService;
+    private final JobRunStats jobStats;
     private final boolean enabled;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public IndicatorAlertJob(IndicatorAlertService indicatorAlertService,
                              TradingCalendarService calendarService,
+                             JobRunStats jobStats,
                              @Value("${stockcat.alert.indicator.enabled:true}") boolean enabled) {
         this.indicatorAlertService = indicatorAlertService;
         this.calendarService = calendarService;
+        this.jobStats = jobStats;
         this.enabled = enabled;
     }
 
@@ -58,11 +62,17 @@ public class IndicatorAlertJob {
         }
         try {
             var summary = indicatorAlertService.evaluateAll();
+            String text = summary.rules() == 0
+                    ? "没有启用中的指标规则"
+                    : "标的 %d 规则 %d 触发 %d".formatted(
+                            summary.instruments(), summary.rules(), summary.triggered());
             if (summary.rules() == 0) {
                 log.debug("没有启用中的指标类规则，跳过");
             }
+            jobStats.recordSuccess(JobRunStats.INDICATOR_ALERT, text);
         } catch (Exception e) {
             log.error("指标告警评估异常: {}", e.getMessage(), e);
+            jobStats.recordFailure(JobRunStats.INDICATOR_ALERT, JobRunStats.errorText(e));
         } finally {
             running.set(false);
         }

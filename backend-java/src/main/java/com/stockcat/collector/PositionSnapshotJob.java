@@ -3,6 +3,7 @@ package com.stockcat.collector;
 import com.stockcat.mapper.PositionSnapshotMapper;
 import com.stockcat.service.PositionSnapshotService;
 import com.stockcat.service.TradingCalendarService;
+import com.stockcat.system.JobRunStats;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,7 @@ public class PositionSnapshotJob {
     private final TradingCalendarService calendarService;
     private final PositionSnapshotService snapshotService;
     private final PositionSnapshotMapper snapshotMapper;
+    private final JobRunStats jobStats;
     private final boolean enabled;
     private final int days;
     private final boolean onStartup;
@@ -42,12 +44,14 @@ public class PositionSnapshotJob {
     public PositionSnapshotJob(TradingCalendarService calendarService,
                                PositionSnapshotService snapshotService,
                                PositionSnapshotMapper snapshotMapper,
+                               JobRunStats jobStats,
                                @Value("${stockcat.position.snapshot.enabled:true}") boolean enabled,
                                @Value("${stockcat.position.snapshot.days:30}") int days,
                                @Value("${stockcat.position.snapshot.on-startup:true}") boolean onStartup) {
         this.calendarService = calendarService;
         this.snapshotService = snapshotService;
         this.snapshotMapper = snapshotMapper;
+        this.jobStats = jobStats;
         this.enabled = enabled;
         this.days = Math.max(1, days);
         this.onStartup = onStartup;
@@ -90,9 +94,14 @@ public class PositionSnapshotJob {
                     result.from(), result.to(), result.tradeDates(), result.rows(),
                     result.warnings().size(), result.elapsedMs());
             result.warnings().forEach(w -> log.warn("持仓快照提示：{}", w));
+            jobStats.recordSuccess(JobRunStats.POSITION_SNAPSHOT,
+                    "%s~%s 交易日 %d 行 %d 提示 %d".formatted(
+                            result.from(), result.to(), result.tradeDates(), result.rows(),
+                            result.warnings().size()));
         } catch (Exception e) {
             // 快照失败不影响行情/告警；第二天会连同区间一起重建
             log.error("持仓快照生成失败: {}", e.getMessage(), e);
+            jobStats.recordFailure(JobRunStats.POSITION_SNAPSHOT, JobRunStats.errorText(e));
         } finally {
             running.set(false);
         }

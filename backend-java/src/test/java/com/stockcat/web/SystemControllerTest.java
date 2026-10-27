@@ -3,6 +3,8 @@ package com.stockcat.web;
 import com.stockcat.assistant.AssistantClient;
 import com.stockcat.collector.CollectorStats;
 import com.stockcat.service.IndexService;
+import com.stockcat.system.DataSourceCatalog;
+import com.stockcat.system.JobRunStats;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -20,13 +22,21 @@ import static org.mockito.Mockito.when;
  */
 class SystemControllerTest {
 
-    private SystemController controller(Map<String, Object> pythonService) {
+    private final JobRunStats jobRunStats = new JobRunStats();
+
+    private SystemController controller(Map<String, Object> pythonService, List<Map<String, Object>> dataSources) {
         CollectorStats stats = new CollectorStats();
         IndexService indexService = Mockito.mock(IndexService.class);
         when(indexService.definitions()).thenReturn(List.of());
         AssistantClient client = Mockito.mock(AssistantClient.class);
         when(client.pythonService()).thenReturn(pythonService);
-        return new SystemController(stats, indexService, null, client);
+        DataSourceCatalog catalog = Mockito.mock(DataSourceCatalog.class);
+        when(catalog.list()).thenReturn(dataSources);
+        return new SystemController(stats, indexService, null, client, catalog, jobRunStats);
+    }
+
+    private SystemController controller(Map<String, Object> pythonService) {
+        return controller(pythonService, List.of());
     }
 
     @Test
@@ -69,5 +79,44 @@ class SystemControllerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> collector = (Map<String, Object>) status.get("quoteCollector");
         assertThat(collector).containsEntry("status", "UNKNOWN");
+    }
+
+    @Test
+    void exposesAllFourJobsEvenIfNeverRan() {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> jobs = (Map<String, Object>) controller(Map.of("status", "DOWN")).status().get("jobs");
+
+        assertThat(jobs).containsOnlyKeys(JobRunStats.HISTORY_SYNC, JobRunStats.FUND_NAV_SYNC,
+                JobRunStats.POSITION_SNAPSHOT, JobRunStats.INDICATOR_ALERT);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> history = (Map<String, Object>) jobs.get(JobRunStats.HISTORY_SYNC);
+        assertThat(history).containsEntry("status", "UNKNOWN");
+    }
+
+    @Test
+    void jobStatusFlipsToFailedAfterException() {
+        jobRunStats.recordFailure(JobRunStats.FUND_NAV_SYNC, "净值源未启动");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> jobs = (Map<String, Object>) controller(Map.of("status", "DOWN")).status().get("jobs");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> nav = (Map<String, Object>) jobs.get(JobRunStats.FUND_NAV_SYNC);
+
+        assertThat(nav).containsEntry("status", "FAILED")
+                .containsEntry("consecutiveFailures", 1)
+                .containsEntry("lastError", "净值源未启动");
+    }
+
+    @Test
+    void dataSourcesArePassedThroughVerbatim() {
+        Map<String, Object> source = Map.of("key", "quote", "name", "实时行情");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> sources =
+                (List<Map<String, Object>>) controller(Map.of("status", "DOWN"), List.of(source))
+                        .status().get("dataSources");
+
+        assertThat(sources).hasSize(1);
+        assertThat(sources.get(0)).containsEntry("key", "quote");
     }
 }

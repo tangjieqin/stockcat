@@ -2,6 +2,7 @@ package com.stockcat.collector;
 
 import com.stockcat.service.KlineSyncService;
 import com.stockcat.service.TradingCalendarService;
+import com.stockcat.system.JobRunStats;
 import com.stockcat.web.dto.KlineSyncBatchSummary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,7 @@ public class KlineSyncScheduler {
 
     private final KlineSyncService syncService;
     private final TradingCalendarService calendarService;
+    private final JobRunStats jobStats;
     private final boolean enabled;
     private final boolean syncOnStartup;
     private final int days;
@@ -37,11 +39,13 @@ public class KlineSyncScheduler {
 
     public KlineSyncScheduler(KlineSyncService syncService,
                               TradingCalendarService calendarService,
+                              JobRunStats jobStats,
                               @Value("${stockcat.history.sync.enabled:true}") boolean enabled,
                               @Value("${stockcat.history.sync.on-startup:false}") boolean syncOnStartup,
                               @Value("${stockcat.history.sync.days:120}") int days) {
         this.syncService = syncService;
         this.calendarService = calendarService;
+        this.jobStats = jobStats;
         this.enabled = enabled;
         this.syncOnStartup = syncOnStartup;
         this.days = days;
@@ -61,6 +65,7 @@ public class KlineSyncScheduler {
             return;
         }
         try {
+            // 统计由 KlineSyncService.syncAll 统一记录（手动触发也走同一条路径）
             KlineSyncBatchSummary summary = syncService.syncAll(days);
             log.info("收盘历史同步：标的 {} 成功 {} 失败 {} 跳过 {}，耗时 {}ms",
                     summary.instruments(), summary.succeeded(), summary.failed(),
@@ -68,6 +73,7 @@ public class KlineSyncScheduler {
         } catch (Exception e) {
             // 兜底：绝不让历史行情同步影响 P0
             log.error("收盘历史同步异常（不影响实时采集与告警）: {}", e.getMessage(), e);
+            jobStats.recordFailure(JobRunStats.HISTORY_SYNC, JobRunStats.errorText(e));
         } finally {
             running.set(false);
         }

@@ -3,6 +3,7 @@ package com.stockcat.collector;
 import com.stockcat.service.FundReferenceService;
 import com.stockcat.service.KlineSyncService;
 import com.stockcat.service.TradingCalendarService;
+import com.stockcat.system.JobRunStats;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,6 +35,7 @@ public class FundNavSyncScheduler {
     private final FundReferenceService fundService;
     private final KlineSyncService klineSyncService;
     private final TradingCalendarService calendarService;
+    private final JobRunStats jobStats;
     private final boolean enabled;
     private final boolean syncOnStartup;
     private final int days;
@@ -43,12 +45,14 @@ public class FundNavSyncScheduler {
     public FundNavSyncScheduler(FundReferenceService fundService,
                                 KlineSyncService klineSyncService,
                                 TradingCalendarService calendarService,
+                                JobRunStats jobStats,
                                 @Value("${stockcat.fund.nav.enabled:true}") boolean enabled,
                                 @Value("${stockcat.fund.nav.on-startup:true}") boolean syncOnStartup,
                                 @Value("${stockcat.fund.nav.days:30}") int days) {
         this.fundService = fundService;
         this.klineSyncService = klineSyncService;
         this.calendarService = calendarService;
+        this.jobStats = jobStats;
         this.enabled = enabled;
         this.syncOnStartup = syncOnStartup;
         this.days = days;
@@ -86,10 +90,13 @@ public class FundNavSyncScheduler {
         try {
             List<Long> ids = klineSyncService.scopeInstrumentIds();
             FundReferenceService.BatchRefresh summary = fundService.refreshAll(ids, days);
-            log.info("晚间净值同步：范围内标的 {}，其中基金 {}，净值入库 {} 期，失败 {}，耗时 {}ms",
-                    ids.size(), summary.instruments(), summary.navWritten(), summary.failed(), summary.elapsedMs());
+            String text = "范围内标的 %d，基金 %d，净值入库 %d 期，失败 %d".formatted(
+                    ids.size(), summary.instruments(), summary.navWritten(), summary.failed());
+            log.info("晚间净值同步：{}，耗时 {}ms", text, summary.elapsedMs());
+            jobStats.recordSuccess(JobRunStats.FUND_NAV_SYNC, text);
         } catch (Exception e) {
             log.error("净值同步异常（不影响实时行情与 IOPV）: {}", e.getMessage(), e);
+            jobStats.recordFailure(JobRunStats.FUND_NAV_SYNC, JobRunStats.errorText(e));
         } finally {
             running.set(false);
         }

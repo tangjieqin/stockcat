@@ -11,6 +11,7 @@ import com.stockcat.mapper.InstrumentMapper;
 import com.stockcat.mapper.KlineDailyMapper;
 import com.stockcat.mapper.MonitorTargetMapper;
 import com.stockcat.mapper.WatchlistMapper;
+import com.stockcat.system.JobRunStats;
 import com.stockcat.web.dto.KlineSyncSummary;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ class KlineSyncServiceTest {
     private HistoryDataClient client;
     private TradingCalendarService calendar;
     private InstrumentMapper instrumentMapper;
+    private JobRunStats jobStats;
     private KlineSyncService service;
 
     @BeforeEach
@@ -44,9 +46,22 @@ class KlineSyncServiceTest {
         client = Mockito.mock(HistoryDataClient.class);
         calendar = Mockito.mock(TradingCalendarService.class);
         instrumentMapper = Mockito.mock(InstrumentMapper.class);
+        jobStats = new JobRunStats();
         service = new KlineSyncService(klineMapper, client, calendar, instrumentMapper,
                 Mockito.mock(WatchlistMapper.class), Mockito.mock(MonitorTargetMapper.class),
-                Mockito.mock(PositionService.class), "15:05");
+                Mockito.mock(PositionService.class), jobStats, "15:05");
+    }
+
+    @Test
+    void syncAll_recordsJobStatsSoTheStatusPageIsNotBlind() {
+        // 同步范围为空也算"跑过一次"：系统状态页应从 UNKNOWN 变成 UP，
+        // 而不是在用户刚点完手动同步后还写着"本进程未运行"
+        service.syncAll(120);
+
+        assertThat(jobStats.view(JobRunStats.HISTORY_SYNC))
+                .containsEntry("status", "UP")
+                .containsEntry("attempts", 1L)
+                .containsEntry("summary", "标的 0 成功 0 失败 0 跳过 0");
     }
 
     // ---------- 过滤规则 ----------
