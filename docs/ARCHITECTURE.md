@@ -16,10 +16,11 @@ flowchart LR
   PYDATA --> SRC[已验证的数据源]
   UI -.->|P2 用户 AI 请求| AGENT[Python Agent（httpx 直连模型）]
   AGENT -->|受控只读业务 API| JAVA
-  JAVA -->|告警通知| NOTICE[邮件 + 一个已验证推送渠道]
+  JAVA -->|告警通知| NOTICE[Server酱推送（邮件未实现）]
 ```
 
 实线代表 P0/P1 主要数据路径；虚线代表 P2 才启用的 AI 请求路径。数据源和推送渠道均需验证后才能认定可用。
+通知渠道目前只有 Server酱；PRD 要求的邮件渠道尚未实现，缺口登记在 `BACKLOG.md §2.1`。
 
 ## 2. 技术栈
 
