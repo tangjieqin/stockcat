@@ -17,6 +17,12 @@ public class MarketRecap {
     /** related_alert_event_ids JSONB 的字符串形式 */
     private String relatedAlertEventIds;
     private String status;   // MANUAL / AI_DRAFT
+    /** AI 草稿溯源信息（V8）：手工创建的行全部为 null；AI_DRAFT 确认转 MANUAL 后仍保留。 */
+    private OffsetDateTime aiGeneratedAt;
+    private String aiModel;
+    private OffsetDateTime aiDataAsOf;
+    /** ai_limitations JSONB 的字符串形式（字符串数组） */
+    private String aiLimitations;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 
@@ -82,6 +88,38 @@ public class MarketRecap {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public OffsetDateTime getAiGeneratedAt() {
+        return aiGeneratedAt;
+    }
+
+    public void setAiGeneratedAt(OffsetDateTime aiGeneratedAt) {
+        this.aiGeneratedAt = aiGeneratedAt;
+    }
+
+    public String getAiModel() {
+        return aiModel;
+    }
+
+    public void setAiModel(String aiModel) {
+        this.aiModel = aiModel;
+    }
+
+    public OffsetDateTime getAiDataAsOf() {
+        return aiDataAsOf;
+    }
+
+    public void setAiDataAsOf(OffsetDateTime aiDataAsOf) {
+        this.aiDataAsOf = aiDataAsOf;
+    }
+
+    public String getAiLimitations() {
+        return aiLimitations;
+    }
+
+    public void setAiLimitations(String aiLimitations) {
+        this.aiLimitations = aiLimitations;
     }
 
     public OffsetDateTime getCreatedAt() {

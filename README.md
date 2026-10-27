@@ -37,12 +37,43 @@ uvicorn app.main:app --reload --port 8100
 | 进程 | 端口 | 职责 | 不启动会怎样 |
 |---|---|---|---|
 | `backend-java` | 8081 | 业务权威：行情采集、告警、持仓、复盘、基金 IOPV（腾讯直连） | 前端全部不可用 |
-| `backend-python` | 8100 | 历史行情与基金净值抓取（P1）/ AI Agent（P2） | 实时行情、告警、IOPV、持仓**照常**；只有历史 K 线与净值同步返回 `DATA_SOURCE_UNAVAILABLE`（净值缺失时 LOF 溢价不显示，ETF 溢价仍可用 IOPV） |
+| `backend-python` | 8100 | 历史行情与基金净值抓取（P1）/ AI 助手 Agent（P2） | 实时行情、告警、IOPV、持仓**照常**；只有历史 K 线与净值同步返回 `DATA_SOURCE_UNAVAILABLE`（净值缺失时 LOF 溢价不显示，ETF 溢价仍可用 IOPV），AI 助手页面提示「AI 服务未启动」 |
 
 Java 在两个场景通过 `http://127.0.0.1:8100/internal/v1/*` 调 Python：同步历史 K 线（`/kline`）与同步基金净值（`/fund-nav`），
-配置项 `stockcat.history-source.base-url`。不想再开一个终端时，可以先只跑 Java + 前端做 P0 的全部功能，需要看 K 线图或 LOF 净值溢价时再起 Python。
+配置项 `stockcat.history-source.base-url`。AI 助手走反方向：前端 → Java `POST /api/v1/assistant/ask` → Python `POST /agent/v1/assistant/ask`
+（配置项 `stockcat.assistant.base-url`，默认同为 `http://127.0.0.1:8100`）。不想再开一个终端时，可以先只跑 Java + 前端做 P0 的全部功能，
+需要看 K 线图、LOF 净值溢价或 AI 助手时再起 Python。
 
 环境变量（均可用默认值）：`STOCKCAT_DB_HOST/PORT/NAME/USER/PASSWORD`，见 `.env.example`。通知推送：在 `.env` 中配置 `stockcat.notify.serverchan.send-key=<你的SendKey>`（sct.ftqq.com 免费申请，推送到微信「方糖」服务号），在「设置-通知」页可查看渠道状态并发送测试通知。
+
+### AI 助手（可选）
+
+在 Python 侧配置三个环境变量即可启用模型分析（OpenAI 兼容协议，DeepSeek / 通义 / Kimi / OpenAI / 本地 Ollama 都适用）：
+
+```bash
+STOCKCAT_LLM_BASE_URL=https://api.deepseek.com/v1
+STOCKCAT_LLM_MODEL=deepseek-chat
+STOCKCAT_LLM_API_KEY=sk-...
+```
+
+- **不配置也能用**：页面会标注「规则汇总模式」，回答由真实数据拼成，只是没有模型写的分析段落；不会伪造 AI 结果。
+- API Key 只放服务端环境变量，前端与接口都不回显；`GET /api/v1/assistant/status` 只报「是否已配置」。
+  **页面里没有填 Key 的输入框**：能在浏览器填的 key，迟早会被存到浏览器里。
+- 配置是否生效、AI 能查哪些数据、三个场景各自怎么降级，都写在侧边栏「其他 · **AI 配置**」页（只读状态页），
+  不用翻文档；`GET /api/v1/system/status` 里也有同一份状态（`pythonService`）。
+- AI 只读业务数据：只能调用 `docs/API.md §10` 的白名单工具，不改流水、不改规则、不发通知。
+  唯一的写入是**复盘草稿**，而且必须由用户点「保存为草稿」才落库，状态固定 `AI_DRAFT`；
+  同一天已有正式复盘时直接 `409`，AI 永不覆盖人工内容（详见 `docs/PLAN_P2.md §0.3`）。
+- 每次调用写一行日志（logger `stockcat.agent`）：场景、模式、模型、耗时、工具成败、token、错误码。
+  不含 Key、不含提问与回答原文；格式见 `docs/API.md §11`。要排查"为什么这次没有分析"，先看这行。
+
+已落地的三个 AI 场景：
+
+| 场景 | 入口 | 说明 |
+|---|---|---|
+| AI 助手（自由提问） | 侧边栏「AI 助手」/ 首页卡片 | 关键词选工具 → 取真实数据 → 模型写结论；回答分「结论 / 数据依据 / 执行过程 / 数据限制」四块 |
+| 告警 AI 解释 | 告警历史每行 [AI 解释] | 右侧抽屉四段：为什么触发 / 这意味着什么 / 当前状态 / 数据依据。**事件快照没保存的指标不会回算**，会明确写"没有保存"；此时不启用模型改写 |
+| AI 复盘草稿 | 市场复盘页「✨ AI 生成草稿」 | 按当天数据生成四段草稿（大盘/自选/持仓/告警），弹窗内可改；顶部固定展示生成时间、数据截至与数据限制。保存为 `AI_DRAFT`，用户编辑保存后才转 `MANUAL`；没有行业板块数据时只按自选分组汇总并明确标注 |
 
 ## 交易日历（P0.4）
 

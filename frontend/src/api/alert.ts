@@ -246,6 +246,38 @@ export async function listAlertEvents(params: { page?: number; size?: number }):
   return resp.data
 }
 
+/**
+ * 告警的 AI 解释（P2 场景二，对应 docs/API.md §5 POST /alert-events/{id}/explain）。
+ * why/meaning 可能由模型改写；evidence/limits 恒由后端模板生成，不可被模型改动。
+ */
+export interface AlertExplain {
+  eventId: number
+  symbol: string | null
+  name: string | null
+  ruleName: string | null
+  ruleType: string | null
+  ruleTypeLabel: string | null
+  /** 触发条件文案，如「价格 ≥ ¥1000」 */
+  condition: string | null
+  mode: 'llm' | 'rule_based'
+  why: string
+  meaning: string
+  current: string
+  evidence: string[]
+  limits: string[]
+  /** false 表示事件快照缺关键观测值，解释会明确说明"当时没有保存" */
+  snapshotComplete: boolean
+  generatedAt: string
+  model: string | null
+  degraded: string[]
+  elapsedMs: number
+}
+
+export async function explainAlertEvent(id: number): Promise<AlertExplain> {
+  const resp = await http.post<AlertExplain>(`/alert-events/${id}/explain`)
+  return resp.data
+}
+
 export function ruleTypeLabel(type: string): string {
   return ruleTypeMeta(type)?.label ?? type
 }

@@ -32,7 +32,7 @@
 | `indicator_result`               | 技术指标结果         | P1 |
 | `fund_reference`                 | 基金 IOPV/净值快照（溢价查询层算） | P1 |
 | `position_snapshot`              | 历史持仓快照        | P1 |
-| `ai_recap`                       | AI 复盘记录        | P2 |
+| `market_recap.ai_*`              | AI 复盘溯源信息（并入复盘表，不单独建表） | P2 |
 | `knowledge_document` / embedding | 资料检索           | P3 |
 
 注：**持仓不单独建表**——P0 单用户数据量小，持仓由 `trade_record` 实时聚合计算（规则见 §3.10）；P1 引入 `position_snapshot` 做历史快照与收益曲线。
@@ -189,9 +189,16 @@
 - `content TEXT NOT NULL`：完整正文（Markdown）
 - `related_alert_event_ids JSONB`：关联告警事件 id 数组，可为空
 - `status VARCHAR(16) NOT NULL DEFAULT 'MANUAL'`：`MANUAL`（手工）/ `AI_DRAFT`（AI 草稿，P2）
+- `ai_generated_at TIMESTAMPTZ`：AI 草稿生成时间（V8）；手工创建为 `NULL`
+- `ai_model VARCHAR(64)`：生成草稿的模型名；规则降级生成时为 `NULL`
+- `ai_data_as_of TIMESTAMPTZ`：草稿所用数据的观测时点（行情采集时间）
+- `ai_limitations JSONB`：生成时的数据限制清单（字符串数组）
 - `created_at` / `updated_at TIMESTAMPTZ NOT NULL`
 - 索引：`(recap_date DESC)`
 - 说明：`market_summary`/`sector_notes` 是结构化提示字段，供编辑页分区填写与 AI（P2）取数，正文仍是完整 `content`。
+- 说明：`ai_*` 四列只做溯源，不参与业务计算。`AI_DRAFT` 经用户编辑确认转 `MANUAL` 后**仍保留**——
+  它回答的是「这份复盘最初怎么来的、数据截至何时」，不是当前状态。删掉它，几周后就分不清
+  "当时写的事实"和"事后补的印象"。
 
 ### 3.12 `diary_node`（我的日记：树状长期笔记本）
 仿飞书文档的树状目录：文件夹与文档统一为一棵树，长期沉淀、不按日期组织。
@@ -279,10 +286,15 @@ P1 只做日线（决策 D3），表名直接叫 `kline_daily`，不引入 `inte
 
 组合层（总市值/总成本/累计盈亏）**不建表**，按 `trade_date` 聚合本表即得。收益口径见 `docs/API.md` §6。
 
-### `ai_recap`
+### ~~`ai_recap`~~（P2 已并入 `market_recap`，本表不建）
 
-- `id`, `recap_date`, `generated_at`, `model_name`, `input_range_json JSONB`, `content TEXT`, `source_summary_json JSONB`, `status`, `error_message`
-- AI 输出需保留生成时间和所用数据范围。
+原计划独立建表存 `generated_at / model_name / input_range_json / content / status`。
+P2 实施时改为直接落在 `market_recap` 上（V8 的 `ai_*` 四列），原因：
+
+- 一天一篇的唯一约束 `UNIQUE(recap_date)` 已经把"草稿与正式复盘"限定为同一条记录的两个状态，
+  再建一张表就要额外维护两张表之间的一致性（哪张是当前版本？删除时谁级联谁？）；
+- `AI_DRAFT → MANUAL` 本来就是一个状态流转，放在同一行里是 `UPDATE status`，跨表就是"复制 + 删除"，
+  中间任何一步失败都会留下两篇内容不同的"同一天复盘"。
 
 ## 5. 迁移与初始化
 

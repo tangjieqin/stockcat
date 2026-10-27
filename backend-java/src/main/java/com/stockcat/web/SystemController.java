@@ -1,5 +1,6 @@
 package com.stockcat.web;
 
+import com.stockcat.assistant.AssistantClient;
 import com.stockcat.collector.CollectorStats;
 import com.stockcat.service.IndexService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,13 +24,16 @@ public class SystemController {
     private final CollectorStats collectorStats;
     private final IndexService indexService;
     private final DataSource dataSource;
+    private final AssistantClient assistantClient;
 
     public SystemController(CollectorStats collectorStats,
                             IndexService indexService,
-                            @Autowired(required = false) DataSource dataSource) {
+                            @Autowired(required = false) DataSource dataSource,
+                            AssistantClient assistantClient) {
         this.collectorStats = collectorStats;
         this.indexService = indexService;
         this.dataSource = dataSource;
+        this.assistantClient = assistantClient;
     }
 
     @GetMapping("/system/status")
@@ -52,6 +56,11 @@ public class SystemController {
         body.put("quoteCollector", quoteCollector);
 
         body.put("indicesConfigured", indexService.definitions().size());
+
+        // Python 服务（历史行情 + AI）：不可用时 DOWN 并带原因，绝不让整页 500。
+        // 注意这里是一次真实探活，Python 挂起时本接口最多多等 3s——状态页可以接受，
+        // 采集与告警都在别的线程，不受影响。
+        body.put("pythonService", assistantClient.pythonService());
         return body;
     }
 

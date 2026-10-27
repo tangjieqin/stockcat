@@ -1,9 +1,10 @@
 # StockCat Python 后端
 
-FastAPI 服务，当前承担 **P1 历史行情适配**；P2 将承接 AI 复盘 Agent（LangChain）。
+FastAPI 服务，当前承担 **P1 历史行情适配** 与 **P2 AI 助手 Agent**。
 
-**职责边界（重要）**：本服务只做「抓取 + 字段映射 + 错误翻译」，不连业务数据库、不写业务表、不做业务取舍。
-复权是否可用于指标、非正值 bar 是否入库、当日未收盘 bar 是否拒写——**全部由 Java 判定**。
+**职责边界（重要）**：本服务只做「抓取 + 字段映射 + 错误翻译」与「编排只读工具 + 生成草稿」，不连业务数据库、不写业务表、不做业务取舍。
+复权是否可用于指标、非正值 bar 是否入库、当日未收盘 bar 是否拒写——**全部由 Java 判定**；
+AI 也只能调用 Java 的只读工具，改不了流水/规则/通知。
 
 ## 本地运行
 
@@ -110,6 +111,70 @@ GET /internal/v1/fund-nav?fundCode=510300&limit=30
 | 502 | `UPSTREAM_ERROR` | 上游 HTTP 非 200、响应非 JSON、`rc≠0` | `DATA_SOURCE_UNAVAILABLE`，可重试 |
 | 502 | `INVALID_UPSTREAM_DATA` | 全部行都无法解析 | `DATA_SOURCE_UNAVAILABLE`，需告警排查 |
 | 504 | `UPSTREAM_TIMEOUT` | 上游超时（默认 8s） | `DATA_SOURCE_UNAVAILABLE`，可重试 |
+
+## AI 助手接口（P2）
+
+供 Java 代理调用（前端只跟 Java 说话）。**不连数据库**，全部业务数据通过 Java 的只读工具取。
+
+### `GET /agent/v1/health`
+
+```json
+{"status":"UP","modelConfigured":false,"model":null,
+ "tools":["positions","watchlist-quotes","alert-events","market-brief","recaps","diary-search"]}
+```
+
+`modelConfigured=false` 表示未配置模型，此时助手仍可用（见下方 `mode`）。**不回显 API Key，也不发探活请求。**
+
+### `POST /agent/v1/assistant/ask`
+
+请求：`{"question": "今天我的持仓发生了什么变化？"}`（≤ 500 字）
+
+响应要点：
+
+```json
+{
+  "question": "今天我的持仓发生了什么变化？",
+  "mode": "rule_based",
+  "answer": {"conclusion": "当前持有 1 只标的，合计市值 2,511.60 元…", "evidence": ["510300 …"], "limits": []},
+  "toolCalls": [{"tool": "positions", "label": "查询持仓", "ok": true, "summary": "1 只持仓", "elapsedMs": 143}],
+  "dataAsOf": "2026-10-27T01:26:25Z",
+  "generatedAt": "2026-10-27T06:49:57Z",
+  "model": null,
+  "usage": null,
+  "degraded": ["未配置模型（STOCKCAT_LLM_* 为空），以下内容由规则汇总生成，不是模型分析结果"],
+  "elapsedMs": 144
+}
+```
+
+- `mode=llm`：模型基于工具数据写结论；`mode=rule_based`：未配置模型或模型失败，由 `app/agent/composer.py` 把真实数据拼成结论。
+- `degraded` 非空时前端必须显示——不能让规则汇总被误当成 AI 分析。
+- `dataAsOf` 取所有工具里最新的观测时点；某个工具失败不会让整次请求失败，失败原因进 `answer.limits`。
+
+### `POST /agent/v1/alerts/explain`
+
+告警解释（P2 场景二），由 Java 组装数据后调用。
+
+请求：`{"event": {…事件快照…}, "current": {…当前行情与指标…}}`，字段见 `docs/API.md` §11。
+
+响应四段：`why`（为什么触发）/ `meaning`（这意味着什么）/ `current`（当前状态）/ `evidence`（数据依据），
+外加 `limits`（数据限制）与 `snapshotComplete`。
+
+**本服务不做任何指标计算**——`observedDetail` 里没有的指标就是没有，不会拿当前 K 线回算。
+模型只能改写 `why` / `meaning`；`current` / `evidence` / `limits` 恒由 `app/agent/alert_explain.py` 模板生成。
+快照不完整（`snapshotComplete=false`）时连 `why` 也不交模型，避免补出一个当时不存在的数字。
+
+## Agent 配置
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `STOCKCAT_JAVA_BASE_URL` | `http://127.0.0.1:8081` | Java 服务地址（工具数据来源） |
+| `STOCKCAT_LLM_BASE_URL` | 空 | OpenAI 兼容地址，如 `https://api.deepseek.com/v1` |
+| `STOCKCAT_LLM_MODEL` | 空 | 模型名，如 `deepseek-chat` |
+| `STOCKCAT_LLM_API_KEY` | 空 | key 只读环境变量，日志与接口都不回显 |
+| `STOCKCAT_LLM_TIMEOUT_SECONDS` | `45` | 单次模型调用超时 |
+| `STOCKCAT_AGENT_MAX_TOOL_CALLS` | `4` | 单次提问最多调用几个工具 |
+
+三个 `LLM_*` 全填才启用模型；只填一半按未配置处理，避免半死的调用。
 
 ## 测试
 

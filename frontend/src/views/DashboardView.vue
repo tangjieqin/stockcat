@@ -35,6 +35,13 @@ const dashboard = ref<Dashboard | null>(null)
 const indices = ref<IndexQuote[]>([])
 const error = ref('')
 
+/** 首页 AI 卡片上的快捷问题：点一下带着问题进对话页，省得手打 */
+const AI_QUESTIONS = [
+  '今天我的持仓发生了什么变化？',
+  '最近哪些告警值得关注？',
+  '根据现有数据说说市场情况。',
+]
+
 onMounted(async () => {
   try {
     dashboard.value = (await http.get<Dashboard>('/dashboard')).data
@@ -146,6 +153,29 @@ function fmtTime(iso: string | null): string {
           <div v-else class="card-sub">还没写过复盘 —— 今天就从它开始</div>
         </div>
       </div>
+
+      <!-- 第四行：AI 助手入口（P2） -->
+      <div class="card ai-card">
+        <div class="ai-head">
+          <div>
+            <div class="card-title">AI 助手</div>
+            <div class="card-sub">
+              基于持仓、行情、告警与复盘数据回答问题；每次回答都会列出调用了哪些工具、数据截至何时。
+            </div>
+          </div>
+          <RouterLink class="btn small" to="/assistant">打开对话页 →</RouterLink>
+        </div>
+        <div class="ai-questions">
+          <button
+            v-for="q in AI_QUESTIONS"
+            :key="q"
+            class="ai-q"
+            @click="router.push({ path: '/assistant', query: { q } })"
+          >
+            {{ q }}
+          </button>
+        </div>
+      </div>
     </template>
     <div v-else-if="!error" class="empty">加载中…</div>
   </div>
@@ -247,5 +277,35 @@ function fmtTime(iso: string | null): string {
 .mini-time {
   font-size: 11px;
   color: var(--text-tertiary);
+}
+/* 第四行：AI 助手入口 */
+.ai-card {
+  margin-bottom: 16px;
+}
+.ai-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.ai-questions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ai-q {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.ai-q:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 </style>

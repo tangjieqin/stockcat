@@ -11,8 +11,44 @@ export interface Recap {
   content: string
   relatedAlertEventIds: number[] | null
   status: 'MANUAL' | 'AI_DRAFT'
+  /** AI 溯源信息：手工创建的复盘为 null；AI 起草后确认为 MANUAL 仍保留 */
+  aiGeneratedAt: string | null
+  aiModel: string | null
+  aiDataAsOf: string | null
+  aiLimitations: string[] | null
   createdAt: string
   updatedAt: string
+}
+
+/** AI 草稿正文四段，与生成接口的 draft 一一对应 */
+export interface RecapDraftContent {
+  title: string
+  marketSummary: string
+  sectorNotes: string
+  content: string
+}
+
+export interface RecapDraftToolCall {
+  tool: string
+  label: string
+  ok: boolean
+  summary: string | null
+  error: string | null
+  dataAsOf: string | null
+}
+
+/** 生成结果：**未落库**，用户点「保存为草稿」才写库 */
+export interface RecapDraftResult {
+  date: string
+  mode: 'llm' | 'rule_based'
+  draft: RecapDraftContent
+  limitations: string[]
+  generatedAt: string
+  dataAsOf: string | null
+  toolCalls: RecapDraftToolCall[]
+  model: string | null
+  degraded: string[]
+  elapsedMs: number
 }
 
 export interface DiaryNodeView {
@@ -68,6 +104,31 @@ export async function updateRecap(id: number, req: {
 
 export async function deleteRecap(id: number): Promise<void> {
   await http.delete(`/recaps/${id}`)
+}
+
+/**
+ * 生成 AI 复盘草稿（不落库）。
+ * 同一天已有 MANUAL 时后端返回 409，前端据此提示「今天已写过」而不是让用户白等。
+ */
+export async function generateRecapDraft(date: string): Promise<RecapDraftResult> {
+  const resp = await http.post<RecapDraftResult>('/recaps/ai-draft', { date })
+  return resp.data
+}
+
+/** 保存 AI 草稿：已有当天草稿则覆盖，状态恒为 AI_DRAFT */
+export async function saveRecapDraft(req: {
+  recapDate: string
+  title: string
+  marketSummary: string
+  sectorNotes: string
+  content: string
+  generatedAt: string
+  model: string | null
+  dataAsOf: string | null
+  limitations: string[]
+}): Promise<Recap> {
+  const resp = await http.post<Recap>('/recaps/drafts', req)
+  return resp.data
 }
 
 export async function diaryTree(): Promise<DiaryNodeView[]> {

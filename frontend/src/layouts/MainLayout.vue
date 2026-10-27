@@ -11,8 +11,11 @@ interface NavItem {
  */
 const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   {
-    // 首页作为独立入口，不设分组标题（避免「首页/首页」重复）
-    items: [{ label: '首页', to: '/', exact: true }],
+    // 首页与 AI 助手都是顶层入口，不设分组标题（避免「首页/首页」重复）
+    items: [
+      { label: '首页', to: '/', exact: true },
+      { label: 'AI 助手', to: '/assistant' },
+    ],
   },
   {
     label: '告警',
@@ -46,7 +49,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
       { label: '通知配置', to: '/settings/notification' },
       { label: '系统状态', to: '/settings/status' },
       { label: '备份', to: '/settings/backup', phase: 'P4' },
-      { label: 'AI 配置', to: '/settings/ai', phase: 'P2' },
+      { label: 'AI 配置', to: '/settings/ai' },
     ],
   },
 ]

@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 public class RecapDtos {
@@ -25,6 +26,28 @@ public class RecapDtos {
             String sectorNotes,
             String content,
             List<Long> relatedAlertEventIds
+    ) {
+    }
+
+    /** 生成 AI 草稿：只给日期，数据由 Agent 通过只读工具自取（缺省为今天，Asia/Shanghai）。 */
+    public record AiDraftRequest(LocalDate date) {
+    }
+
+    /**
+     * 保存 AI 草稿。内容可能被用户先改过，所以正文由前端回传；
+     * {@code generatedAt / model / dataAsOf / limitations} 是溯源信息，原样带回落库，
+     * 不允许前端改写——否则「数据截至何时」就失去了可信度。
+     */
+    public record SaveRecapDraftRequest(
+            @NotNull LocalDate recapDate,
+            @NotBlank String title,
+            String marketSummary,
+            String sectorNotes,
+            @NotBlank String content,
+            OffsetDateTime generatedAt,
+            String model,
+            OffsetDateTime dataAsOf,
+            List<String> limitations
     ) {
     }
 

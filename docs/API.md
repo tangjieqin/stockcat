@@ -400,6 +400,45 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 
 返回单条事件和完整通知记录。
 
+### `POST /alert-events/{id}/explain`
+
+AI 解释一条已触发的事件（P2 场景二）。**只读**：不写库、不改规则、不发通知；事件不存在返回 `404 NOT_FOUND`。
+
+没有任何请求体。返回结构：
+
+```json
+{
+  "eventId": 100,
+  "symbol": "600519",
+  "name": "贵州茅台",
+  "ruleName": "茅台 MACD 金叉",
+  "ruleType": "MACD_GOLDEN_CROSS",
+  "ruleTypeLabel": "MACD 金叉",
+  "condition": "条件是「DIF 上穿 DEA」（日线，收盘后判定）",
+  "mode": "llm",
+  "why": "2026-10-26 22:00，条件是「DIF 上穿 DEA」：DIF 0.0123 上穿 DEA 0.0101，条件成立，因此触发。",
+  "meaning": "DIF 上穿 DEA，通常被看作短期动能相对转强的技术信号。MACD 属于滞后指标……",
+  "current": "当前最新价 ¥1355.9，涨跌幅 +0.44%。最新已收盘日线（2026-10-26）上，DIF=0.008、DEA=0.0101，DIF 位于 DEA 下方（触发时在上方，已发生反向穿越）。",
+  "evidence": ["触发时 DIF=0.0123、DEA=0.0101", "MACD 柱 +0.0044"],
+  "limits": ["该事件由收盘后日线判定，不含盘中行情时间……"],
+  "snapshotComplete": true,
+  "generatedAt": "2026-10-27T07:10:00Z",
+  "model": "deepseek-chat",
+  "usage": {"model": "deepseek-chat", "promptTokens": 620, "completionTokens": 180},
+  "degraded": [],
+  "elapsedMs": 1840
+}
+```
+
+字段约定：
+
+- `why` / `meaning`：可读性文字。配置了模型时由模型改写措辞，否则模板生成。
+- `current` / `evidence` / `limits`：**恒由后端模板生成，不经过模型**——数据依据不能被模型"润色"。
+- `snapshotComplete=false`：事件快照缺少关键观测值（例如早期事件没存 RSI 数值）。此时 `why` 会明确写"快照没有保存 X，无法给出具体值"，且**不交由模型改写**（模型最容易在这里补一个合理数字）。
+- `mode=rule_based` 时 `degraded` 必非空，前端要显示"这不是模型分析结果"。
+- 数值口径：价格按原精度，指标值保留 4 位小数。
+- AI 不可用返回 `503 DATA_SOURCE_UNAVAILABLE`，`GET /alert-events` 等接口不受影响。
+
 ### `POST /notifications/{id}/retry`
 
 重试失败通知；只允许对 `FAILED` 记录重试，返回更新后的通知记录。必须避免重复发送已成功通知。
@@ -497,8 +536,38 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 | GET | `/recaps/{id}` | 单条详情 |
 | PATCH | `/recaps/{id}` | 修改各字段；编辑 `AI_DRAFT` 并保存后状态变 `MANUAL`（用户确认） |
 | DELETE | `/recaps/{id}` | `204`，前端需二次确认 |
+| POST | `/recaps/ai-draft` | 生成 AI 草稿，**不落库**；请求 `{"date":"2026-10-27"}`（可省略，缺省今天） |
+| POST | `/recaps/drafts` | 保存 AI 草稿为 `AI_DRAFT`；已有当天草稿则覆盖，已有 `MANUAL` 返回 `409` |
 
 `marketSummary`（市场主要情况）与 `sectorNotes`（板块表现）为可选结构化字段，编辑页分区填写；用户手工创建的复盘 `status` 恒为 `MANUAL`，P2 的 AI 只能生成 `AI_DRAFT`，不得覆盖 `MANUAL`。
+
+**AI 草稿两个入口的分工**（详见 PLAN_P2 §2 P2.3/P2.4）：
+
+- `POST /recaps/ai-draft` 只是代理 Python `POST /agent/v1/recap/draft`，把生成结果原样返回给前端预览。
+  生成前先查当天是否已有 `MANUAL`：有就 `409`，不花 token 生成一份注定不能保存的草稿。
+- `POST /recaps/drafts` 才写库。请求体：
+
+```json
+{
+  "recapDate": "2026-10-27",
+  "title": "2026-10-27 复盘（AI 草稿）",
+  "marketSummary": "…", "sectorNotes": "…", "content": "# …（Markdown）",
+  "generatedAt": "2026-10-27T07:30:00Z",
+  "model": "deepseek-chat",
+  "dataAsOf": "2026-10-27T07:00:00Z",
+  "limitations": ["指数与自选行情是采集时点快照，不是交易所官方收盘价。"]
+}
+```
+
+`generatedAt` / `model` / `dataAsOf` / `limitations` 由生成接口原样回传，落库后作为溯源信息
+（V8 的 `ai_*` 四列），**确认转 `MANUAL` 后仍保留**——它记录的是"这份复盘最初怎么来的"，不是当前状态。
+
+复盘响应新增四个字段，手工创建的为 `null`：
+
+```json
+{"aiGeneratedAt": "2026-10-27T07:30:00Z", "aiModel": "deepseek-chat",
+ "aiDataAsOf": "2026-10-27T07:00:00Z", "aiLimitations": ["…"]}
+```
 
 ### 我的日记 `/diary`（树状长期笔记本）
 
@@ -542,14 +611,129 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
   "application": "UP",
   "database": "UP",
   "quoteCollector": {"status": "DEGRADED", "lastSuccessAt": "2026-10-24T01:00:00Z", "lastErrorCode": "DATA_SOURCE_UNAVAILABLE"},
-  "notification": {"emailConfigured": true, "pushChannelConfigured": false},
-  "pythonService": {"status": "UNKNOWN"}
+  "indicesConfigured": 3,
+  "pythonService": {
+    "status": "UP",
+    "baseUrl": "http://127.0.0.1:8100",
+    "agent": {"status": "UP", "modelConfigured": true, "model": "gpt-4o-mini", "toolCount": 6}
+  }
 }
 ```
 
+`pythonService` 是**真实探活**（`GET /agent/v1/health`，3s 上限）：
+
+- Python 没起来时 `status=DOWN` 并带可读的 `error`，**不带 `agent`**；本接口仍返回 `200`，
+  因为"AI 没开"是正常状态，不是系统故障。
+- `agent` 只报"配没配模型、几个工具"，不搬整个白名单（要看清单用 `/assistant/status` 或 §10）。
+- 探活最多多等 3s；行情采集与告警在别的线程，不受影响。
+
 不要在该接口返回密码、token、环境变量值或堆栈。
 
-## 10. Python API（分阶段）
+## 10. Agent 只读工具与 AI 助手（P2）
+
+供 Python Agent 取数的白名单接口，前缀 `/api/v1/agent/tools`。**全部 GET、全部只读**：
+`AgentToolControllerTest` 用反射断言这里不存在任何写映射，新增工具必须同时改代码与白名单。
+
+统一包装（每个工具都返回这个结构）：
+
+```json
+{
+  "tool": "positions",
+  "dataAsOf": "2026-10-27T06:30:00Z",
+  "data": { },
+  "missing": ["510300 沪深300ETF 缺有效价格（priceStatus=STALE），市值未计入汇总"]
+}
+```
+
+- `dataAsOf` 是数据自身的观测时点（取内部最新时间戳），**不是**请求时间；AI 复盘里的"数据截至"必须用它。
+- `missing` 是"本该有但没有"的说明，空数组表示数据完整。数值取不到一律 `null`，**不补 0**。
+- 缺失/异常不算 HTTP 错误：工具照常 200 返回，缺失信息进 `missing`，由模型在正文里如实说明。
+
+### `GET /agent/tools/watchlist-quotes`
+
+自选行情。无快照的标的仍然出现在 `items` 里（价格为 `null`、`dataStatus=NO_DATA`）并进 `missing`；
+`groupName` 为 `null` 时输出默认分组名 `自选`。
+
+```json
+{"tool":"watchlist-quotes","dataAsOf":"2026-10-27T06:30:00Z",
+ "data":{"count":1,"items":[{"instrumentId":1,"symbol":"600519","name":"贵州茅台","type":"STOCK",
+   "groupName":"自选","lastPrice":1700.0,"previousClose":1674.9,"changePercent":1.5,
+   "marketTime":"2026-10-27T06:30:00Z","collectedAt":"2026-10-27T06:30:02Z","dataStatus":"VALID"}]},
+ "missing":[]}
+```
+
+### `GET /agent/tools/positions`
+
+当前持仓与汇总。`priceComplete=false` 表示有持仓缺有效行情，此时
+`totalMarketValue`/`totalUnrealizedPnl` 只是"能取到价的部分"，不能当全组合市值。
+
+```json
+{"tool":"positions","dataAsOf":"2026-10-27T06:30:00Z",
+ "data":{"count":1,"totalMarketValue":170000,"totalUnrealizedPnl":2000,"totalRealizedPnl":0,
+   "pricedCount":1,"priceComplete":true,"note":"市值与浮动盈亏只基于有效行情快照…",
+   "items":[{"instrumentId":1,"symbol":"600519","name":"贵州茅台","quantity":100,"avgCost":1680,
+     "lastPrice":1700,"marketValue":170000,"unrealizedPnl":2000,"realizedPnl":0,
+     "priceAsOf":"2026-10-27T06:30:00Z","priceStatus":"VALID"}]},
+ "missing":[]}
+```
+
+### `GET /agent/tools/alert-events?limit=10`
+
+最近告警事件（按触发时间倒序）。`limit` 默认 10、上限 50。没有告警是正常状态，不进 `missing`。
+
+### `GET /agent/tools/market-brief?date=2026-10-27`
+
+当日市场概况：指数行情 + 自选涨跌分布 `{total,up,down,flat,noData,avgChangePercent}`。
+只有 `dataStatus=VALID` 的行情参与涨跌统计（STALE 的涨跌幅是过时的）；`avgChangePercent` 无可统计样本时为 `null`。
+
+`date` 只表示这份复盘的归属日期：**指数只有最新采集快照，不回补历史**，传入非今日日期会在 `missing` 中明确说明。
+`indices` 为空表示当前没有有效指数快照（常见于非交易时段重启服务，要等下一个采集窗口才有值），此时 `dataAsOf` 退化为自选行情的采集时间。
+
+### `GET /agent/tools/recaps?from=&to=&limit=5`
+
+历史复盘摘要（按日期倒序，正文截断为 240 字预览）。`limit` 默认 5、上限 20。
+**只返回 `status=MANUAL`**：AI 草稿不当作历史依据，被排除的草稿数写进 `missing`。
+
+### `GET /agent/tools/diary/search?keyword=白酒&limit=5`
+
+日记正文检索，返回命中标题、树路径（`投资 / 复盘`）与正文预览。`keyword` 必填（空关键词返回校验错误），
+`limit` 默认 5、上限 20。日记没有行情时间语义，`dataAsOf` 为 `null`。
+
+### `POST /assistant/ask`（前端唯一入口）
+
+前端只跟 Java 说话，所以 AI 助手由 Java 代理到 Python `POST /agent/v1/assistant/ask`（契约见 §11）。
+Java 不改写字段，只做超时（60s）与错误翻译。
+
+```json
+{"question": "今天我的持仓发生了什么变化？"}
+```
+
+响应（由 Python 生成，Java 原样返回）：
+
+```json
+{
+  "mode": "rule_based",
+  "answer": {"conclusion": "当前持有 1 只标的，合计市值 2,511.60 元…", "evidence": ["510300 …"], "limits": []},
+  "toolCalls": [{"tool": "positions", "label": "查询持仓", "ok": true, "summary": "1 只持仓", "elapsedMs": 143}],
+  "dataAsOf": "2026-10-27T01:26:25Z",
+  "generatedAt": "2026-10-27T06:49:57Z",
+  "model": null,
+  "usage": null,
+  "degraded": ["未配置模型…以下内容由规则汇总生成"],
+  "elapsedMs": 144
+}
+```
+
+- `mode=llm` 为模型生成，`mode=rule_based` 为规则汇总；`degraded` 非空时前端必须展示。
+- 请求体 `question` 为空或超 500 字返回 `400 VALIDATION_ERROR`。
+- Python 未启动 / 超时返回 `503 DATA_SOURCE_UNAVAILABLE`，错误信息直接给出启动命令。
+
+### `GET /assistant/status`
+
+AI 服务与模型配置状态，供「AI 配置」页显示：`{available, agent:{status, modelConfigured, model, tools}, error?, baseUrl}`。
+**从不回显 API Key**，也不做模型探活请求。
+
+## 11. Python API（分阶段）
 
 ### P0
 
@@ -569,29 +753,92 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
   基金日终净值（天天基金 `lsjz`，带 `FSRQ` 净值日期）。`limit` 上限 250，上游单页只回 20 行，适配器内部翻页。
   返回 `{source,fundCode,requestedLimit,fetchedAt,totalCount,count,skippedRows,items[]}`。完整契约见 `backend-python/README.md`。
 
-### P2 Agent
+### P2 Agent（已实现，内部契约）
 
-- `POST /agent/v1/chat`  
-  请求：
-
-```json
-{"message": "请总结今天自选标的的表现", "conversationId": "optional-client-id"}
-```
-
-响应：
+- `GET /agent/v1/health` → `{status, modelConfigured, model, tools[]}`；不回显 key、不发探活请求。
+- `POST /agent/v1/assistant/ask` 请求 `{"question":"..."}`，响应见 §10 的同名说明（Java 代理原样返回）。
+- `POST /agent/v1/alerts/explain` 告警解释（P2 场景二，对应 §5 的 Java 接口）。
 
 ```json
 {
-  "answer": "基于当前可用数据生成的摘要……",
-  "generatedAt": "2026-10-24T01:00:00Z",
-  "dataAsOf": "2026-10-24T00:55:00Z",
-  "limitations": ["部分标的数据可能延迟"]
+  "event": {
+    "id": 100, "symbol": "600519", "name": "贵州茅台",
+    "ruleName": "茅台 MACD 金叉", "ruleType": "MACD_GOLDEN_CROSS",
+    "params": {}, "observedPrice": 1500.0, "observedChangePercent": 2.35,
+    "observedDetail": {"tradeDate": "2026-10-26", "dif": 0.0123, "dea": 0.0101, "macdHist": 0.0044},
+    "triggeredAt": "2026-10-26T14:00:00Z", "quoteMarketTime": "2026-10-26T07:00:00Z"
+  },
+  "current": {
+    "lastPrice": 1520.0, "changePercent": 1.2, "dataStatus": "VALID",
+    "marketTime": "2026-10-27T06:30:00Z", "collectedAt": "2026-10-27T06:30:20Z",
+    "latestTradeDate": "2026-10-27", "indicators": {"dif": 0.008, "dea": 0.0101}, "barsAvailable": 250
+  }
 }
 ```
 
-Agent 通过 Java 受控只读工具查询数据，不直接访问数据库。以上是未来契约，不表示 P0 已实现。
+`event` 由 Java 从 `alert_event` 原样读出（`observedDetail` 为 null 时就是 null，**不补算**）；
+`current` 中 `indicators` 仅在指标类规则时出现。Python 不做任何指标计算，只把这两块事实讲清楚，
+因此不存在"用今天的 K 线重算当年指标"的问题。
 
-## 11. 兼容性与版本策略
+响应结构见 §5 `POST /alert-events/{id}/explain`，两者字段完全一致（Java 原样代理）。
+
+- `POST /agent/v1/recap/draft` 生成每日复盘草稿（P2 场景三）。请求 `{"date":"2026-10-27"}`（可省略，缺省今天）。
+
+```json
+{
+  "date": "2026-10-27",
+  "mode": "rule_based",
+  "draft": {"title": "2026-10-27 复盘（AI 草稿）", "marketSummary": "…", "sectorNotes": "…", "content": "# …"},
+  "limitations": ["指数与自选行情是采集时点快照，不是交易所官方收盘价。", "…"],
+  "generatedAt": "2026-10-27T07:30:00Z",
+  "dataAsOf": "2026-10-27T07:00:00Z",
+  "toolCalls": [{"tool": "market-brief", "label": "查询市场概况", "ok": true, "summary": "3 个指数"}],
+  "model": null,
+  "usage": null,
+  "degraded": ["未配置模型（STOCKCAT_LLM_* 为空），以下内容由规则底稿生成，不是模型撰写"],
+  "elapsedMs": 186
+}
+```
+
+固定取 5 个工具（`market-brief` / `positions` / `watchlist-quotes` / `alert-events` / `recaps`），
+不做关键词规划——写一篇复盘需要的上下文是确定的。**不落库**：落库与确认在 Java 侧（§7）。
+
+- 无任何数据（指数、自选、持仓全空）时返回 `502 NO_DATA`，不生成"今天市场平淡"这类空话；
+- `limitations` 恒由模板按工具返回 `missing` 生成，模型输出里的限制项**一概不采信**；
+- 行业板块数据未采集，`sectorNotes` 只能是自选分组汇总，并保留"非行业板块"的限定；
+- 模型输出缺任一段（title/marketSummary/sectorNotes/content）即整篇退回规则底稿，不拼半截。
+
+知识边界（实现中固定下来，后续不得放宽）：
+- 工具白名单硬编码在 `backend-python/app/agent/java_tools.py`，与 Java 侧 `AgentToolController` 两份清单保持一致；
+- 数值只能来自工具返回，缺数据写 `limits`，**不补 0、不推测**；
+- 不输出买卖建议；模型输出非 JSON 即失败并降级为规则汇总，不去猜；
+- 告警解释的 `current` / `evidence` / `limits` 恒由模板生成，模型只能改写 `why` / `meaning`；
+  快照不完整时连 `why` 也不交给模型；
+- 日志只记模型名/耗时/token，不记 key 与完整 prompt。
+
+`POST /agent/v1/chat`（多轮对话）**未实现**，P2 不做多轮与会话记忆；当前会话仅存在前端 localStorage。
+
+### P2.6 运行日志（实现约定）
+
+三个场景（问答 / 告警解释 / 复盘草稿）每次调用写**一行** `key=value`，logger 名 `stockcat.agent`：
+
+```
+2026-10-27 15:42:11,203 INFO stockcat.agent agent scene=recap date=2026-10-27 mode=llm
+  model=gpt-4o-mini elapsedMs=8123 tools=market-brief:ok,positions:ok usage=1234+312 err=-
+```
+
+| 字段 | 含义 |
+|---|---|
+| `scene` | `assistant` / `alert` / `recap` |
+| `mode` | `llm` 或 `rule_based`；拒绝生成时为空 |
+| `tools` | `工具名:ok/fail` 列表；告警解释为 `-`（数据由 Java 组装，不经工具） |
+| `usage` | `promptTokens+completionTokens`，未知写 `-` |
+| `err` | 模型侧错误码（`MODEL_TIMEOUT` / `MODEL_ERROR` / `MODEL_OUTPUT_INVALID`）或业务码（如 `NO_DATA`） |
+| `errText` | 截断到 120 字符、压成一行的错误说明 |
+
+**不记** API Key、prompt 原文、回答正文。失败与拒绝生成也要写一条，否则"用户说点了没反应"时无从查起。
+
+## 12. 兼容性与版本策略
 
 - P0 API 前缀固定为 `/api/v1`。
 - 字段改名、语义变化或删除属于破坏性变更，需要更新文档、前端类型和测试。

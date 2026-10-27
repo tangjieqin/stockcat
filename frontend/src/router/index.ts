@@ -12,6 +12,8 @@ const router = createRouter({
       component: () => import('../layouts/MainLayout.vue'),
       children: [
         { path: '', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '首页' } },
+        // AI 助手（P2）：唯一独立开发的 AI 主页面，其他业务页后续用按钮/卡片嵌入
+        { path: 'assistant', name: 'assistant', component: () => import('../views/AssistantView.vue'), meta: { title: 'AI 助手' } },
 
         // 告警
         { path: 'alerts', name: 'alert-overview', component: () => import('../views/AlertOverviewView.vue'), meta: { title: '告警总览' } },
@@ -37,7 +39,7 @@ const router = createRouter({
         { path: 'settings/notification', name: 'notification', component: () => import('../views/NotificationView.vue'), meta: { title: '通知配置' } },
         { path: 'settings/status', name: 'system-status', component: () => import('../views/PlaceholderView.vue'), meta: { title: '系统状态' } },
         { path: 'settings/backup', name: 'backup', component: () => import('../views/PlaceholderView.vue'), meta: { title: '备份', phase: 'P4' } },
-        { path: 'settings/ai', name: 'ai-config', component: () => import('../views/PlaceholderView.vue'), meta: { title: 'AI 配置', phase: 'P2' } },
+        { path: 'settings/ai', name: 'ai-config', component: () => import('../views/AiConfigView.vue'), meta: { title: 'AI 配置' } },
       ],
     },
   ],
