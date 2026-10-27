@@ -14,6 +14,7 @@ import java.util.Map;
 
 /**
  * 自选列表（与监控标的相互独立）。对应 docs/API.md §2。
+ * V7 起支持自定义分组：group_name 为 NULL 表示默认「自选」；一个标的只属于一个分组。
  */
 @Service
 public class WatchlistService {
@@ -37,6 +38,7 @@ public class WatchlistService {
                         new com.stockcat.web.dto.InstrumentResponse(row.getInstrumentId(), row.getMarket(),
                                 row.getSymbol(), row.getName(), row.getInstrumentType(), row.getCurrency()),
                         row.getCreatedAt(),
+                        row.getGroupName(),
                         null))
                 .toList();
         if (items.isEmpty()) {
@@ -44,8 +46,14 @@ public class WatchlistService {
         }
         Map<Long, QuoteResponse> quotes = quoteService.latest(items.stream().map(WatchlistItemResponse::id).toList());
         return items.stream()
-                .map(item -> new WatchlistItemResponse(item.id(), item.instrument(), item.createdAt(), quotes.get(item.id())))
+                .map(item -> new WatchlistItemResponse(item.id(), item.instrument(), item.createdAt(),
+                        item.groupName(), quotes.get(item.id())))
                 .toList();
+    }
+
+    /** 已有分组名（不含默认「自选」）。 */
+    public List<String> groups() {
+        return watchlistMapper.selectDistinctGroups();
     }
 
     @Transactional
@@ -54,12 +62,25 @@ public class WatchlistService {
         if (watchlistMapper.existsByInstrumentId(instrument.getId()) > 0) {
             throw ApiException.conflict("该标的已在自选列表中: " + instrument.getSymbol() + " " + instrument.getName());
         }
-        watchlistMapper.insert(instrument.getId());
+        String groupName = normalizeGroup(req.groupName());
+        watchlistMapper.insert(instrument.getId(), groupName);
         Long id = watchlistMapper.findIdByInstrumentId(instrument.getId());
         return new WatchlistItemResponse(id,
                 com.stockcat.web.dto.InstrumentResponse.from(instrument),
                 null,
+                groupName,
                 null);
+    }
+
+    /** 移动到分组；groupName 为 null/空白 = 移回默认「自选」。 */
+    @Transactional
+    public WatchlistItemResponse moveToGroup(Long instrumentId, String groupName) {
+        String normalized = normalizeGroup(groupName);
+        int updated = watchlistMapper.updateGroupName(instrumentId, normalized);
+        if (updated == 0) {
+            throw ApiException.notFound("自选条目不存在: instrumentId=" + instrumentId);
+        }
+        return findById(instrumentId);
     }
 
     public void delete(Long instrumentId) {
@@ -67,5 +88,21 @@ public class WatchlistService {
         if (deleted == 0) {
             throw ApiException.notFound("自选条目不存在: instrumentId=" + instrumentId);
         }
+    }
+
+    private WatchlistItemResponse findById(Long instrumentId) {
+        return list().stream()
+                .filter(item -> item.instrument().id().equals(instrumentId))
+                .findFirst()
+                .orElseThrow(() -> ApiException.notFound("自选条目不存在: instrumentId=" + instrumentId));
+    }
+
+    /** 空白 → null（默认自选）；去掉首尾空白。 */
+    private String normalizeGroup(String groupName) {
+        if (groupName == null) {
+            return null;
+        }
+        String trimmed = groupName.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

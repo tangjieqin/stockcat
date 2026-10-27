@@ -2,7 +2,9 @@ package com.stockcat.service;
 
 import com.stockcat.domain.MarketRecap;
 import com.stockcat.mapper.AlertEventMapper;
+import com.stockcat.mapper.AlertRuleMapper;
 import com.stockcat.mapper.MarketRecapMapper;
+import com.stockcat.mapper.MonitorTargetMapper;
 import com.stockcat.mapper.WatchlistMapper;
 import com.stockcat.web.dto.QuoteResponse;
 import org.springframework.stereotype.Service;
@@ -24,16 +26,21 @@ public class DashboardService {
     private final WatchlistMapper watchlistMapper;
     private final AlertEventMapper alertEventMapper;
     private final MarketRecapMapper recapMapper;
+    private final MonitorTargetMapper monitorTargetMapper;
+    private final AlertRuleMapper alertRuleMapper;
 
     public DashboardService(IndexService indexService, PositionService positionService,
                             QuoteService quoteService, WatchlistMapper watchlistMapper,
-                            AlertEventMapper alertEventMapper, MarketRecapMapper recapMapper) {
+                            AlertEventMapper alertEventMapper, MarketRecapMapper recapMapper,
+                            MonitorTargetMapper monitorTargetMapper, AlertRuleMapper alertRuleMapper) {
         this.indexService = indexService;
         this.positionService = positionService;
         this.quoteService = quoteService;
         this.watchlistMapper = watchlistMapper;
         this.alertEventMapper = alertEventMapper;
         this.recapMapper = recapMapper;
+        this.monitorTargetMapper = monitorTargetMapper;
+        this.alertRuleMapper = alertRuleMapper;
     }
 
     public Map<String, Object> dashboard() {
@@ -55,10 +62,13 @@ public class DashboardService {
                 "totalUnrealizedPnl", totalUnrealized,
                 "positionCount", positions.size()));
 
-        // 3. 自选标的涨跌幅居前（按绝对值）
-        List<Long> watchIds = watchlistMapper.selectAll().stream()
+        // 3. 自选标的涨跌幅居前（按绝对值，带代码/名称供首页直接展示）
+        List<com.stockcat.domain.MonitorTargetRow> watchRows = watchlistMapper.selectAll();
+        List<Long> watchIds = watchRows.stream()
                 .map(com.stockcat.domain.MonitorTargetRow::getInstrumentId).toList();
         Map<Long, QuoteResponse> quotes = quoteService.latest(watchIds);
+        Map<Long, com.stockcat.domain.MonitorTargetRow> watchById = watchRows.stream()
+                .collect(Collectors.toMap(com.stockcat.domain.MonitorTargetRow::getInstrumentId, r -> r));
         List<Map<String, Object>> topMovers = quotes.entrySet().stream()
                 .filter(e -> e.getValue().changePercent() != null)
                 .sorted((a, b) -> Double.compare(
@@ -67,12 +77,22 @@ public class DashboardService {
                 .map(e -> {
                     Map<String, Object> m = new LinkedHashMap<String, Object>();
                     m.put("instrumentId", e.getKey());
+                    var row = watchById.get(e.getKey());
+                    m.put("symbol", row == null ? "" : row.getSymbol());
+                    m.put("name", row == null ? "" : row.getName());
                     m.put("changePercent", e.getValue().changePercent());
                     m.put("lastPrice", e.getValue().lastPrice());
                     return m;
                 })
                 .collect(Collectors.toList());
         body.put("topMovers", topMovers);
+
+        // 3.1 自选与监控计数（首页第二行右侧卡片）
+        body.put("overview", Map.of(
+                "watchlistCount", watchIds.size(),
+                "monitorCount", monitorTargetMapper.countAll(),
+                "enabledMonitorCount", monitorTargetMapper.countEnabled(),
+                "enabledRuleCount", alertRuleMapper.countEnabled()));
 
         // 4. 最近告警事件（P0 无已读状态，取最近 5 条）
         var events = alertEventMapper.selectPage(null, null, null, null, 0, 5);

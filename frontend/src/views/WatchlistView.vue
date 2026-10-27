@@ -3,13 +3,16 @@
  * 自选列表页（行情总览）。
  * 对应 docs/UI.md「我的股票-自选列表」与 docs/API.md §2/§3。
  * 无快照显示 —（不按 0）；STALE 标注行情时间；来源与采集时间可见。
+ * 自定义分组：顶部页签「自选 / 我的组合…」切换，行内可移动分组；分组名存 watchlist_item.group_name（null=默认自选）。
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   addWatchlist,
   changeColor,
   deleteWatchlistItem,
   listWatchlist,
+  listWatchlistGroups,
+  moveWatchlistGroup,
   refreshQuotes,
   type RefreshSummary,
   type WatchlistItem,
@@ -18,6 +21,9 @@ import { ApiError } from '../api/client'
 import { basisLabel, getLatestPremiums, premiumText, type FundPremium } from '../api/fund'
 
 const items = ref<WatchlistItem[]>([])
+const groups = ref<string[]>([])
+/** '' = 默认「自选」，其余为自定义分组名 */
+const activeGroup = ref('')
 const premiums = ref<Record<string, FundPremium>>({})
 const loading = ref(false)
 const errorMsg = ref('')
@@ -25,15 +31,33 @@ const refreshing = ref(false)
 const refreshSummary = ref<RefreshSummary | null>(null)
 
 const showAdd = ref(false)
-const form = ref({ market: 'CN_A', symbol: '', type: 'STOCK', name: '' })
+const form = ref({ market: 'CN_A', symbol: '', type: 'STOCK', name: '', group: '' })
 const addError = ref('')
 const submitting = ref(false)
+
+const filteredItems = computed(() =>
+  activeGroup.value === ''
+    ? items.value.filter((i) => !i.groupName)
+    : items.value.filter((i) => i.groupName === activeGroup.value),
+)
+
+function countOf(group: string): number {
+  return group === ''
+    ? items.value.filter((i) => !i.groupName).length
+    : items.value.filter((i) => i.groupName === group).length
+}
 
 async function load() {
   loading.value = true
   errorMsg.value = ''
   try {
-    items.value = await listWatchlist()
+    const [list, groupNames] = await Promise.all([listWatchlist(), listWatchlistGroups()])
+    items.value = list
+    groups.value = groupNames
+    // 当前分组移空后已不存在，回退到「自选」
+    if (activeGroup.value !== '' && !groupNames.includes(activeGroup.value)) {
+      activeGroup.value = ''
+    }
     await loadPremiums()
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
@@ -101,14 +125,40 @@ async function submitAdd() {
       symbol: form.value.symbol.trim(),
       type: form.value.type,
       name: form.value.name.trim() || undefined,
+      groupName: form.value.group || undefined,
     })
     showAdd.value = false
-    form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '' }
+    form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '', group: '' }
     await load()
   } catch (e) {
     addError.value = e instanceof ApiError ? e.message : '添加失败，请重试'
   } finally {
     submitting.value = false
+  }
+}
+
+/** 新建分组：分组本身随第一个成员的加入而创建（空分组不落库）。 */
+function newGroup() {
+  const name = prompt('输入新分组名称（添加标的时选择该分组即可创建）')
+  if (name === null) return
+  const trimmed = name.trim()
+  if (!trimmed) return
+  if (trimmed.length > 64) {
+    alert('分组名最长 64 字符')
+    return
+  }
+  showAdd.value = true
+  form.value = { market: 'CN_A', symbol: '', type: 'STOCK', name: '', group: trimmed }
+}
+
+/** 行内移动分组；group 为 '' 表示移回默认「自选」。 */
+async function moveTo(item: WatchlistItem, group: string) {
+  if ((item.groupName ?? '') === group) return
+  try {
+    await moveWatchlistGroup(item.instrument.id, group || null)
+    await load()
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -167,7 +217,25 @@ onMounted(load)
     </div>
     <div v-if="errorMsg" class="banner error">{{ errorMsg }}</div>
 
-    <table v-if="items.length" class="table">
+    <!-- 分组页签：自选 + 自定义组合 -->
+    <div class="group-tabs">
+      <button class="group-tab" :class="{ active: activeGroup === '' }" @click="activeGroup = ''">
+        自选 <span class="cnt">{{ countOf('') }}</span>
+      </button>
+      <button
+        v-for="g in groups"
+        :key="g"
+        class="group-tab"
+        :class="{ active: activeGroup === g }"
+        @click="activeGroup = g"
+      >
+        {{ g }} <span class="cnt">{{ countOf(g) }}</span>
+      </button>
+      <button class="group-tab new" title="新建分组" @click="newGroup">＋ 新建分组</button>
+    </div>
+
+    <div v-if="filteredItems.length" class="table-wrap">
+      <table class="table">
       <thead>
         <tr>
           <th>代码</th>
@@ -182,7 +250,7 @@ onMounted(load)
         </tr>
       </thead>
       <tbody>
-        <tr v-for="it in items" :key="it.id">
+        <tr v-for="it in filteredItems" :key="it.id">
           <td class="mono">
             <RouterLink class="detail-link" :to="`/stocks/${it.instrument.id}`">{{ it.instrument.symbol }}</RouterLink>
           </td>
@@ -220,13 +288,25 @@ onMounted(load)
           </td>
           <td class="ops">
             <RouterLink class="btn small" :to="`/stocks/${it.instrument.id}`">K 线</RouterLink>
+            <select
+              class="move-select"
+              :value="it.groupName ?? ''"
+              title="移动到分组"
+              @change="moveTo(it, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">自选</option>
+              <option v-for="g in groups" :key="g" :value="g">{{ g }}</option>
+            </select>
             <button class="btn small danger" @click="remove(it)">移除</button>
           </td>
         </tr>
       </tbody>
     </table>
+    </div>
 
-    <div v-else-if="!loading" class="empty">暂无自选标的，点击右上角「添加自选」开始</div>
+    <div v-else-if="!loading" class="empty">
+      {{ activeGroup === '' ? '暂无自选标的，点击右上角「添加自选」开始' : `分组「${activeGroup}」暂无标的，可在行内移动过来` }}
+    </div>
     <div v-else>加载中…</div>
 
     <!-- 添加弹窗 -->
@@ -255,7 +335,14 @@ onMounted(load)
           <label>名称</label>
           <input v-model="form.name" placeholder="可选，通常自动从行情源补全" />
         </div>
-        <p class="hint">名称将由行情源自动补全并验证；无法验证且未填名称时不会创建。</p>
+        <div class="form-row">
+          <label>分组</label>
+          <select v-model="form.group">
+            <option value="">自选（默认）</option>
+            <option v-for="g in groups" :key="g" :value="g">{{ g }}</option>
+          </select>
+        </div>
+        <p class="hint">名称将由行情源自动补全并验证；无法验证且未填名称时不会创建。新分组可先点「＋ 新建分组」。</p>
         <div v-if="addError" class="banner error">{{ addError }}</div>
         <div class="modal-foot">
           <button class="btn" @click="showAdd = false">取消</button>
@@ -403,8 +490,53 @@ onMounted(load)
 .ops {
   white-space: nowrap;
 }
-.ops .btn + .btn {
+.ops .btn + .btn,
+.ops .move-select {
   margin-left: 6px;
+}
+.move-select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  max-width: 96px;
+}
+.group-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 12px;
+  flex-wrap: wrap;
+}
+.group-tab {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.group-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.group-tab.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.group-tab.new {
+  border-style: dashed;
+  color: var(--text-tertiary);
+}
+.group-tab .cnt {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: 2px;
 }
 .detail-link {
   color: inherit;

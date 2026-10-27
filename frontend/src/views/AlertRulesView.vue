@@ -190,7 +190,8 @@ onMounted(load)
 
     <div v-if="errorMsg" class="banner error">{{ errorMsg }}</div>
 
-    <table v-if="rules.length" class="table">
+    <div v-if="rules.length" class="table-wrap">
+      <table class="table">
       <thead>
         <tr>
           <th>规则</th>
@@ -220,6 +221,7 @@ onMounted(load)
         </tr>
       </tbody>
     </table>
+    </div>
 
     <div v-else-if="!loading" class="empty">
       暂无规则。先在「监控」添加标的（可顺带创建规则），或点击「新建规则」。

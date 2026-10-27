@@ -30,3 +30,225 @@ h1 {
   font-size: 20px;
   margin: 0 0 16px;
 }
+
+/* ================= 共享页面骨架 =================
+   各视图直接复用，保证页面标题、说明文字、卡片间距、
+   按钮尺寸和表格行高全局一致；视图内 scoped 样式只做补充。 */
+
+/* 页头：标题 + 说明 + 右侧操作 */
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.page-head h1 {
+  margin: 0;
+}
+.page-head .sub {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+.page-head .actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+/* 按钮：统一高度与字号 */
+button.btn,
+a.btn {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: 6px;
+  padding: 0 12px;
+  height: 30px;
+  line-height: 28px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+  text-decoration: none;
+  display: inline-block;
+  white-space: nowrap;
+}
+button.btn:hover,
+a.btn:hover {
+  background: var(--bg-hover);
+}
+button.btn.primary,
+a.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.btn.small,
+a.btn.small {
+  height: 26px;
+  line-height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+button.btn.danger,
+a.btn.danger {
+  color: #b91c1c;
+}
+button.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 表格：统一行高；包一层 .table-wrap 让窄窗口横向滚动（操作列保持可见） */
+.table-wrap {
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.table th {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+.table tbody tr:hover td {
+  background: #fafbfc;
+}
+.mono {
+  font-family: Consolas, monospace;
+}
+.muted {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+/* 提示条 */
+.banner {
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.banner.ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.banner.error {
+  background: #fdf2f2;
+  color: #b91c1c;
+  border: 1px solid #f8b4b4;
+}
+
+/* 卡片 */
+.card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--bg-panel);
+}
+
+/* 空态 / 加载 */
+.empty {
+  color: var(--text-tertiary);
+  padding: 48px 0;
+  text-align: center;
+}
+
+/* 弹窗 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.modal {
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+.modal h2 {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.form-row label {
+  width: 56px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.form-row input,
+.form-row select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* 徽标 */
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.badge.ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+.badge.stale {
+  background: #fffbeb;
+  color: #b45309;
+}
+.badge.bad {
+  background: #fdf2f2;
+  color: #b91c1c;
+}
+.badge.off {
+  background: var(--bg-hover);
+  color: var(--text-tertiary);
+}

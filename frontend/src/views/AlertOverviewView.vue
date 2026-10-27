@@ -94,7 +94,8 @@ onMounted(load)
     </div>
 
     <h2 class="section">最近事件</h2>
-    <table v-if="events.length" class="table">
+    <div v-if="events.length" class="table-wrap">
+      <table class="table">
       <thead>
         <tr>
           <th>触发时间</th>
@@ -116,6 +117,7 @@ onMounted(load)
         </tr>
       </tbody>
     </table>
+    </div>
     <div v-else-if="!loading" class="empty">暂无事件 —— 去「规则」页配置第一条告警</div>
   </div>
 </template>

@@ -48,7 +48,8 @@ onMounted(() => load(0))
 
     <div v-if="errorMsg" class="banner error">{{ errorMsg }}</div>
 
-    <table v-if="events.length" class="table">
+    <div v-if="events.length" class="table-wrap">
+      <table class="table">
       <thead>
         <tr>
           <th>触发时间</th>
@@ -82,6 +83,7 @@ onMounted(() => load(0))
         </tr>
       </tbody>
     </table>
+    </div>
 
     <div v-else-if="!loading" class="empty">暂无告警事件 —— 配置规则后，交易时段内触发将在此显示</div>
     <div v-else>加载中…</div>

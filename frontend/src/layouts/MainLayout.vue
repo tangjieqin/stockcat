@@ -29,7 +29,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
       { label: '自选列表', to: '/stocks/watchlist' },
       { label: '我的持仓', to: '/stocks/positions' },
       { label: '交易流水', to: '/stocks/trades' },
-      { label: '持仓变化', to: '/stocks/position-changes', phase: 'P1' },
+      // 持仓变化自 P1.5 起并入「我的持仓」页签，不再单独占一个导航位
     ],
   },
   {
@@ -80,7 +80,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
 <style scoped>
 .layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
 }
 .sidebar {
   width: 200px;
@@ -88,6 +88,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   border-right: 1px solid var(--border);
   padding: 16px 8px;
   background: var(--bg-panel);
+  overflow-y: auto;
 }
 .brand {
   font-weight: 700;
@@ -133,9 +134,12 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   border-radius: 4px;
   padding: 0 4px;
 }
+/* 主内容区负责滚动：侧边栏固定，页面级横向溢出在这里被拦住 */
 .content {
   flex: 1;
-  padding: 24px 32px;
   min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 28px;
 }
 </style>

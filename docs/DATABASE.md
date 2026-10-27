@@ -57,6 +57,7 @@
 
 - `id BIGINT PK`
 - `instrument_id BIGINT NOT NULL FK -> instrument.id`
+- `group_name VARCHAR(64)`（V7 起可空：自定义分组，NULL = 默认「自选」；一个标的只属于一个分组；分组列表 = DISTINCT group_name，空分组自然消失）
 - `created_at TIMESTAMPTZ NOT NULL`
 - 唯一约束：`UNIQUE(instrument_id)`（P0 单用户）
 - 删除自选不自动删除标的主数据和历史行情。

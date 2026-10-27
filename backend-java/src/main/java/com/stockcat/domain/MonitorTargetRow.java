@@ -11,6 +11,8 @@ public class MonitorTargetRow {
     private Long instrumentId;
     private Boolean enabled;
     private OffsetDateTime createdAt;
+    // watchlist_item 专用（V7 自选分组）：NULL = 默认「自选」
+    private String groupName;
     // join instrument
     private String market;
     private String symbol;
@@ -48,6 +50,14 @@ public class MonitorTargetRow {
 
     public void setCreatedAt(OffsetDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getGroupName() {
+        return groupName;
+    }
+
+    public void setGroupName(String groupName) {
+        this.groupName = groupName;
     }
 
     public String getMarket() {

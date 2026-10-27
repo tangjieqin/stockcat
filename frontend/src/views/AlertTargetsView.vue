@@ -132,7 +132,8 @@ onMounted(load)
 
     <div v-if="errorMsg" class="banner error">{{ errorMsg }}</div>
 
-    <table v-if="targets.length" class="table">
+    <div v-if="targets.length" class="table-wrap">
+      <table class="table">
       <thead>
         <tr>
           <th>代码</th>
@@ -168,6 +169,7 @@ onMounted(load)
         </tr>
       </tbody>
     </table>
+    </div>
 
     <div v-else-if="!loading" class="empty">暂无监控标的，点击右上角「添加监控标的」开始</div>
     <div v-else>加载中…</div>

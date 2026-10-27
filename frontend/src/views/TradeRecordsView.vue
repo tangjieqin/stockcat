@@ -110,7 +110,8 @@ onMounted(load)
     <div v-if="successMsg" class="banner ok">{{ successMsg }}</div>
     <div v-if="errorMsg" class="banner error">{{ errorMsg }}</div>
 
-    <table v-if="trades.length" class="table">
+    <div v-if="trades.length" class="table-wrap">
+      <table class="table">
       <thead>
         <tr>
           <th>成交时间</th>
@@ -144,6 +145,7 @@ onMounted(load)
         </tr>
       </tbody>
     </table>
+    </div>
 
     <div v-else-if="!loading" class="empty">暂无交易流水，点击「记一笔」开始</div>
     <div v-else>加载中…</div>

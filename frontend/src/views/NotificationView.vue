@@ -97,7 +97,8 @@ onMounted(load)
     </div>
 
     <h2 class="section">最近通知</h2>
-    <table v-if="records.length" class="table">
+    <div v-if="records.length" class="table-wrap">
+      <table class="table">
       <thead>
         <tr>
           <th>时间</th>
@@ -126,6 +127,7 @@ onMounted(load)
         </tr>
       </tbody>
     </table>
+    </div>
     <div v-else-if="!loading" class="empty">暂无通知记录 —— 点「发送测试通知」验证渠道</div>
   </div>
 </template>

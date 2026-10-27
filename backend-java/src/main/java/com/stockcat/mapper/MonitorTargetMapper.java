@@ -20,6 +20,12 @@ public interface MonitorTargetMapper {
     @Select("SELECT count(*) FROM monitor_target WHERE instrument_id = #{instrumentId}")
     long existsByInstrumentId(@Param("instrumentId") Long instrumentId);
 
+    @Select("SELECT count(*) FROM monitor_target")
+    long countAll();
+
+    @Select("SELECT count(*) FROM monitor_target WHERE enabled = TRUE")
+    long countEnabled();
+
     @Select("""
             SELECT t.id, t.instrument_id, t.enabled, t.created_at,
                    i.market, i.symbol, i.name, i.instrument_type, i.currency

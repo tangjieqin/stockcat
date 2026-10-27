@@ -193,7 +193,8 @@ onMounted(() => {
 
     <!-- ---------------- 当前持仓 ---------------- -->
     <template v-if="tab === 'positions'">
-      <table v-if="positions.length" class="table">
+      <div v-if="positions.length" class="table-wrap">
+        <table class="table">
         <thead>
           <tr>
             <th>标的</th>
@@ -227,6 +228,7 @@ onMounted(() => {
           </tr>
         </tbody>
       </table>
+      </div>
       <div v-else-if="!loading" class="empty">暂无持仓 —— 在「交易流水」记录买入后自动计算</div>
       <div v-else class="empty">加载中…</div>
     </template>
@@ -290,7 +292,8 @@ onMounted(() => {
 
     <!-- ---------------- 持仓变化 ---------------- -->
     <template v-else>
-      <table v-if="changes.length" class="table">
+      <div v-if="changes.length" class="table-wrap">
+        <table class="table">
         <thead>
           <tr>
             <th>标的</th>
@@ -332,6 +335,7 @@ onMounted(() => {
           </tr>
         </tbody>
       </table>
+      </div>
       <div v-else-if="!loading" class="empty">
         <p>该区间内没有持仓快照。</p>
         <p class="empty-sub">换一个更长的区间，或先点「重建快照」。</p>

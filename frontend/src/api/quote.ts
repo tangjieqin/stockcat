@@ -18,6 +18,8 @@ export interface WatchlistItem {
   id: number
   instrument: Instrument
   createdAt: string | null
+  /** 自定义分组；null = 默认「自选」 */
+  groupName: string | null
   quote: Quote | null
 }
 
@@ -44,8 +46,26 @@ export async function listWatchlist(): Promise<WatchlistItem[]> {
   return resp.data
 }
 
-export async function addWatchlist(req: { market: string; symbol: string; type: string; name?: string }): Promise<WatchlistItem> {
+/** 自定义分组名列表（不含默认「自选」）。 */
+export async function listWatchlistGroups(): Promise<string[]> {
+  const resp = await http.get<string[]>('/watchlist/groups')
+  return resp.data
+}
+
+export async function addWatchlist(req: {
+  market: string
+  symbol: string
+  type: string
+  name?: string
+  groupName?: string
+}): Promise<WatchlistItem> {
   const resp = await http.post<WatchlistItem>('/watchlist', req)
+  return resp.data
+}
+
+/** 移动到分组；groupName 传 undefined/null = 移回默认「自选」。 */
+export async function moveWatchlistGroup(instrumentId: number, groupName: string | null): Promise<WatchlistItem> {
+  const resp = await http.patch<WatchlistItem>(`/watchlist/${instrumentId}/group`, { groupName })
   return resp.data
 }
 

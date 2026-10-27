@@ -8,6 +8,9 @@ import java.util.List;
 @Mapper
 public interface AlertRuleMapper {
 
+    @Select("SELECT count(*) FROM alert_rule WHERE enabled = TRUE")
+    long countEnabled();
+
     @Insert("""
             INSERT INTO alert_rule (name, instrument_id, rule_type, params, cooldown_seconds, enabled, created_at, updated_at)
             VALUES (#{name}, #{instrumentId}, #{ruleType}, CAST(#{paramsJson} AS jsonb), #{cooldownSeconds},

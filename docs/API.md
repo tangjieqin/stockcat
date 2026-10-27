@@ -67,29 +67,30 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 
 ### `POST /watchlist`
 
-请求（`name` 可选：P0.3 起服务端从行情源自动验证并补全名称；行情源不可用且未提供名称时返回错误，不创建无法验证的标的）：
+请求（`name` 可选：P0.3 起服务端从行情源自动验证并补全名称；行情源不可用且未提供名称时返回错误，不创建无法验证的标的。`groupName` 可选：自定义分组，空白/null = 默认「自选」，最长 64 字符）：
 
 ```json
-{"market": "CN_A", "symbol": "600000", "type": "STOCK"}
+{"market": "CN_A", "symbol": "600000", "type": "STOCK", "groupName": "我的组合1"}
 ```
 
 响应 `201 Created`：
 
 ```json
-{"id": 1, "instrumentId": 1, "market": "CN_A", "symbol": "600000", "name": "示例标的", "createdAt": "2026-10-24T01:00:00Z"}
+{"id": 1, "instrumentId": 1, "market": "CN_A", "symbol": "600000", "name": "示例标的", "groupName": "我的组合1", "createdAt": "2026-10-24T01:00:00Z"}
 ```
 
 重复添加返回 `409 CONFLICT`。如果服务端无法验证或补全标的主数据，应返回明确错误，不默默创建伪造名称。
 
 ### `GET /watchlist`
 
-返回自选标的及最新可用快照：
+返回自选标的及最新可用快照。`groupName` 为 `null` 表示默认「自选」；**一个标的只属于一个分组**（同一标的在不同分组中重复出现是不支持的）：
 
 ```json
 {
   "items": [
     {
       "instrument": {"id": 1, "market": "CN_A", "symbol": "600000", "name": "示例标的", "type": "STOCK"},
+      "groupName": null,
       "quote": {
         "lastPrice": 10.25,
         "previousClose": 10.00,
@@ -105,6 +106,22 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 ```
 
 如果没有快照，`quote` 为 `null`，不能将价格设为 0。
+
+### `GET /watchlist/groups`
+
+返回自定义分组名列表（不含默认「自选」）。分组不需要单独创建/删除：随第一个成员加入而出现，最后一个成员移出后自然消失。
+
+```json
+["我的组合1", "我的组合2"]
+```
+
+### `PATCH /watchlist/{instrumentId}/group`
+
+移动标的到分组；`groupName` 传 `null`/空白 = 移回默认「自选」。条目不存在返回 `404`。
+
+```json
+{"groupName": "我的组合2"}
+```
 
 ### `DELETE /watchlist/{instrumentId}`
 
