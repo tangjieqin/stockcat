@@ -182,6 +182,24 @@ class AgentAlertEventSnapshot(CamelModel):
     quote_market_time: datetime | None = None
 
 
+class AgentPremiumState(CamelModel):
+    """当前溢价快照（2026-10-27）。
+
+    只有溢价类规则（PREMIUM_ABOVE / PREMIUM_BELOW）才会带这一段：溢价事件里
+    "现在溢价多少"就是答案的一半。缺数据时整个 ``premium`` 为 null，**不是** 0——
+    0 会被读成"溢价归零"，而 null 表示"没查到"。
+    """
+
+    premium_rate: float | None = Field(default=None, description="溢价率，百分数：0.15 表示 0.15%")
+    premium_basis: str | None = Field(default=None, description="IOPV（ETF 盘中）或 NAV（净值）")
+    premium_as_of: str | None = Field(default=None, description="基准时间：IOPV 时间戳或净值日期")
+    price: float | None = None
+    iopv: float | None = None
+    nav: float | None = None
+    nav_date: Date | None = Field(default=None, description="净值日期，与 NAV 基准一起看")
+    nav_stale_days: int | None = Field(default=None, description="净值距该交易日的天数")
+
+
 class AgentAlertCurrentState(CamelModel):
     """当前状态：与事件快照严格分开，用于回答「现在怎么样了」。"""
 
@@ -195,6 +213,10 @@ class AgentAlertCurrentState(CamelModel):
         default=None, description="最新已收盘日线的指标值；仅指标类规则会带"
     )
     bars_available: int = Field(default=0, description="可用日 K 根数，用于解释指标为何缺失")
+    premium: AgentPremiumState | None = Field(
+        default=None,
+        description="当前溢价；仅溢价类规则会带。缺数据为 null，前端与解释据此说明「没查到」",
+    )
 
 
 class AgentAlertExplainRequest(CamelModel):

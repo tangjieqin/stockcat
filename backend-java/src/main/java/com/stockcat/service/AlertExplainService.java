@@ -13,6 +13,7 @@ import com.stockcat.indicator.IndicatorCalculator;
 import com.stockcat.mapper.AlertEventMapper;
 import com.stockcat.mapper.InstrumentMapper;
 import com.stockcat.mapper.KlineDailyMapper;
+import com.stockcat.web.dto.FundPremiumResponse;
 import com.stockcat.web.dto.QuoteResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,7 @@ public class AlertExplainService {
     private final KlineDailyMapper klineMapper;
     private final IndicatorCalculator calculator;
     private final RuleEvaluatorRegistry registry;
+    private final FundReferenceService fundReferenceService;
     private final AssistantClient assistantClient;
     private final ObjectMapper objectMapper;
     private final String adjust;
@@ -59,6 +61,7 @@ public class AlertExplainService {
     public AlertExplainService(AlertEventMapper eventMapper, InstrumentMapper instrumentMapper,
                                QuoteService quoteService, KlineDailyMapper klineMapper,
                                IndicatorCalculator calculator, RuleEvaluatorRegistry registry,
+                               FundReferenceService fundReferenceService,
                                AssistantClient assistantClient, ObjectMapper objectMapper,
                                @Value("${stockcat.alert.indicator.adjust:qfq}") String adjust,
                                @Value("${stockcat.alert.indicator.bars:250}") int bars) {
@@ -68,6 +71,7 @@ public class AlertExplainService {
         this.klineMapper = klineMapper;
         this.calculator = calculator;
         this.registry = registry;
+        this.fundReferenceService = fundReferenceService;
         this.assistantClient = assistantClient;
         this.objectMapper = objectMapper;
         this.adjust = adjust;
@@ -84,7 +88,7 @@ public class AlertExplainService {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("event", snapshot(event, instrument));
-        payload.put("current", currentState(event.getInstrumentId(), ruleType));
+        payload.put("current", currentState(event, instrument, ruleType));
         log.debug("解释告警事件: id={} type={}", eventId, ruleType);
         return assistantClient.explainAlert(payload);
     }
@@ -112,7 +116,8 @@ public class AlertExplainService {
      * <p>价格类规则查一遍 250 根 K 线只为算指标，是纯浪费；而指标类规则不查就答不了
      * "现在怎么样了"。这个判断依赖评估器的 {@code requiresHistory()}，与告警评估同一口径。
      */
-    private Map<String, Object> currentState(Long instrumentId, String ruleType) {
+    private Map<String, Object> currentState(AlertEvent event, Instrument instrument, String ruleType) {
+        Long instrumentId = event.getInstrumentId();
         Map<String, Object> m = new LinkedHashMap<>();
         QuoteResponse quote = quoteService.latest(List.of(instrumentId)).get(instrumentId);
         if (quote == null) {
@@ -130,6 +135,11 @@ public class AlertExplainService {
         }
 
         m.put("barsAvailable", 0);
+        if (requiresPremium(ruleType)) {
+            // 溢价类事件不谈"现在溢价多少"等于没解释：触发时 3%、现在已经回到 1%，
+            // 和仍在 4%，是两件完全不同的事
+            m.put("premium", currentPremium(instrument));
+        }
         if (!requiresHistory(ruleType)) {
             return m;
         }
@@ -156,6 +166,42 @@ public class AlertExplainService {
         put(indicators, "j", latest.j());
         m.put("indicators", indicators);
         return m;
+    }
+
+    /**
+     * 当前溢价快照。标的已删或不是基金时返回 null——Python 侧据此如实说"没有溢价数据"，
+     * 而不是拿 0 当"溢价归零"。
+     */
+    private Map<String, Object> currentPremium(Instrument instrument) {
+        if (instrument == null) {
+            return null;
+        }
+        FundPremiumResponse premium = fundReferenceService
+                .latestPremiums(List.of(instrument)).get(instrument.getId());
+        if (premium == null) {
+            return null;
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        put(m, "premiumRate", premium.premiumRate());
+        m.put("premiumBasis", premium.premiumBasis());
+        m.put("premiumAsOf", premium.premiumAsOf());
+        put(m, "price", premium.price());
+        put(m, "iopv", premium.iopv());
+        put(m, "nav", premium.nav());
+        if (premium.navDate() != null) {
+            m.put("navDate", premium.navDate().toString());
+        }
+        m.put("navStaleDays", premium.navStaleDays());
+        return m;
+    }
+
+    private boolean requiresPremium(String ruleType) {
+        try {
+            return registry.get(ruleType).requiresPremium();
+        } catch (Exception e) {
+            log.debug("规则类型无法识别，按非溢价类处理: {}", ruleType);
+            return false;
+        }
     }
 
     private boolean requiresHistory(String ruleType) {

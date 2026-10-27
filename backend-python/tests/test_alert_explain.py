@@ -145,8 +145,108 @@ def test_premium_event_reports_basis_and_nav_date():
     assert "单位净值" in result["why"]          # 基准必须说清是 NAV 还是 IOPV
     assert any("净值日期 2026-10-20" in item for item in result["evidence"])
     assert any("距今 2 天" in item for item in result["evidence"])
-    # 当前溢价率没有取数，不能假装做过对比
-    assert any("当前溢价率不在本次取数范围内" in item for item in result["limits"])
+
+
+def test_request_schema_keeps_premium_snapshot():
+    """Pydantic 默认丢弃未声明的字段——Java 传来的 premium 曾在这里被静默吃掉，
+    导致解释里永远写着"当前没有可用的溢价数据"。这条守住通路：
+    schema 不认得的字段，到解释层就是 None，而且不会有任何报错提示。"""
+    from app.schemas import AgentAlertExplainRequest
+
+    req = AgentAlertExplainRequest(**{
+        "event": {
+            "id": 20, "symbol": "510300", "ruleType": "PREMIUM_ABOVE",
+            "ruleName": "沪深300ETF 溢价≥2%", "params": {"threshold": 2},
+            "triggeredAt": "2026-10-25T14:18:00Z",
+        },
+        "current": {
+            "lastPrice": 4.186,
+            "premium": {
+                "premiumRate": -0.1526, "premiumBasis": "IOPV",
+                "premiumAsOf": "2026-10-27T08:14:35Z", "price": 4.123,
+                "iopv": 4.1293, "navDate": "2026-10-27", "navStaleDays": 0,
+            },
+        },
+    })
+    payload = req.model_dump(mode="json", by_alias=True)
+
+    assert payload["current"]["premium"]["premiumRate"] == -0.1526
+    assert payload["current"]["premium"]["premiumBasis"] == "IOPV"
+    assert payload["current"]["premium"]["premiumAsOf"] == "2026-10-27T08:14:35Z"
+
+
+def test_premium_event_compares_with_current_premium():
+    """Java 侧从 P4 前置小件起会带上当前溢价，这时解释要给"回落/上升"而不是"没取数"。"""
+    event = {
+        "id": 16,
+        "symbol": "161725",
+        "name": "招商中证白酒",
+        "ruleName": "白酒 LOF 溢价 ≥ 2%",
+        "ruleType": "PREMIUM_ABOVE",
+        "params": {"threshold": 2},
+        "observedPrice": 0.92,
+        "observedDetail": {"premium": {"premiumRate": 2.45, "premiumBasis": "IOPV"}},
+        "triggeredAt": "2026-10-22T06:00:00Z",
+        "quoteMarketTime": "2026-10-22T06:00:00Z",
+    }
+    current = dict(CURRENT, premium={
+        "premiumRate": 1.18, "premiumBasis": "IOPV",
+        "premiumAsOf": "2026-10-27T06:30:00Z", "price": 0.905, "iopv": 0.894,
+    })
+    result = alert_explain.explain({"event": event, "current": current})
+
+    assert "当前溢价率 +1.18%" in result["current"]
+    assert "回落 1.27 个百分点" in result["current"]
+    assert any("当前溢价率 +1.18%" in item for item in result["evidence"])
+    # 有数据就不该再留"没做对比"的口子
+    assert not any("无法判断溢价" in item for item in result["limits"])
+
+
+def test_premium_event_flags_rising_premium():
+    event = {
+        "id": 17, "symbol": "161725", "name": "招商中证白酒", "ruleType": "PREMIUM_ABOVE",
+        "params": {"threshold": 2}, "observedPrice": 0.92,
+        "observedDetail": {"premium": {"premiumRate": 2.45, "premiumBasis": "IOPV"}},
+        "triggeredAt": "2026-10-22T06:00:00Z",
+    }
+    current = dict(CURRENT, premium={
+        "premiumRate": 3.10, "premiumBasis": "IOPV", "premiumAsOf": "2026-10-27T06:30:00Z",
+    })
+    result = alert_explain.explain({"event": event, "current": current})
+
+    assert "又上升 0.65 个百分点" in result["current"]
+
+
+def test_premium_basis_mismatch_refuses_to_subtract():
+    """触发时用净值、当前用 IOPV，两者滞后性不同——只列数值，不给差额。"""
+    event = {
+        "id": 18, "symbol": "161725", "name": "招商中证白酒", "ruleType": "PREMIUM_ABOVE",
+        "params": {"threshold": 2}, "observedPrice": 0.92,
+        "observedDetail": {"premium": {"premiumRate": 2.45, "premiumBasis": "NAV"}},
+        "triggeredAt": "2026-10-22T06:00:00Z",
+    }
+    current = dict(CURRENT, premium={
+        "premiumRate": 1.18, "premiumBasis": "IOPV", "premiumAsOf": "2026-10-27T06:30:00Z",
+    })
+    result = alert_explain.explain({"event": event, "current": current})
+
+    assert "只列数值不做差额对比" in result["current"]
+    assert not any("百分点" in item for item in [result["current"]])
+    assert any("基准不同" in item for item in result["limits"])
+
+
+def test_premium_without_current_data_says_so():
+    event = {
+        "id": 19, "symbol": "161725", "name": "招商中证白酒", "ruleType": "PREMIUM_ABOVE",
+        "params": {"threshold": 2}, "observedPrice": 0.92,
+        "observedDetail": {"premium": {"premiumRate": 2.45, "premiumBasis": "IOPV"}},
+        "triggeredAt": "2026-10-22T06:00:00Z",
+    }
+    # 有行情但没有 premium 字段：可能是标的不是基金，或 IOPV 还没采到
+    result = alert_explain.explain({"event": event, "current": dict(CURRENT)})
+
+    assert "无法判断溢价是否已经回落" in result["current"]
+    assert any("当前溢价率缺失" in item for item in result["limits"])
 
 
 def test_stale_quote_is_flagged_not_treated_as_realtime():

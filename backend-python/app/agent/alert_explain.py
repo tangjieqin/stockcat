@@ -116,9 +116,6 @@ def explain(payload: dict[str, Any]) -> dict[str, Any]:
 
     evidence = list(why_facts) + list(current_facts)
     limits.extend(_data_time_limits(event, current, rule_type))
-    if rule_type in _PREMIUM_RULES:
-        # Java 这次没取当前溢价率（要另查 IOPV/净值），如实说明，不装作对比过
-        limits.append("当前溢价率不在本次取数范围内，未做溢价对比。")
     if not evidence:
         limits.append("这条事件没有任何可引用的观测值，无法说明触发依据。")
 
@@ -293,6 +290,13 @@ def _current(rule_type: str, event: dict[str, Any], detail: dict[str, Any],
         except (TypeError, ValueError):
             pass
 
+    if rule_type in _PREMIUM_RULES:
+        premium_text, premium_facts, premium_missing = _premium_compare(detail, current.get("premium"))
+        if premium_text:
+            parts.append(premium_text)
+        facts.extend(premium_facts)
+        missing.extend(premium_missing)
+
     if rule_type in _INDICATOR_RULES:
         indicators = current.get("indicators") or {}
         trade_date = current.get("latestTradeDate")
@@ -312,6 +316,64 @@ def _current(rule_type: str, event: dict[str, Any], detail: dict[str, Any],
                 missing.append("当前指标值缺失或与事件快照不可比，未做数值对比。")
 
     return "".join(parts), facts, missing
+
+
+def _premium_compare(detail: dict[str, Any],
+                     current: dict[str, Any] | None) -> tuple[str, list[str], list[str]]:
+    """当前溢价与触发时对比（P4 前置小件，2026-10-27）。
+
+    溢价类事件里，"现在溢价多少"就是全部答案：触发时 3.1%、现在回到 1.2%，
+    说明机会已经消失；现在 4.5%，说明还在扩大。缺了这段，解释等于只说了一半。
+
+    基准不同（触发时用净值、当前用 IOPV）时不比数值：两者的滞后性完全不同，
+    硬比会得出"回落 0.3 个百分点"这种看似精确、实际无意义的结论。
+    """
+    facts: list[str] = []
+    missing: list[str] = []
+    if not current or current.get("premiumRate") is None:
+        return ("当前没有可用的溢价数据（IOPV/净值缺失，或该标的不是基金），"
+                "无法判断溢价是否已经回落。", facts,
+                ["当前溢价率缺失，未做溢价对比。"])
+
+    rate = current["premiumRate"]
+    basis = str(current.get("premiumBasis") or "")
+    basis_label = _BASIS_LABEL.get(basis, "未知基准")
+    as_of = current.get("premiumAsOf") or current.get("fetchedAt")
+    when = f"，{_cn_time(as_of)}" if as_of else ""
+    text = f"当前溢价率 {_pct(rate)}（基准：{basis_label}{when}）。"
+    facts.append(f"当前溢价率 {_pct(rate)}（{basis_label}）")
+
+    if current.get("price") is not None:
+        facts.append(f"当前价格 ¥{_num(current['price'])}")
+    if current.get("iopv") is not None:
+        facts.append(f"当前 IOPV {_num(current['iopv'])}")
+    if current.get("nav") is not None:
+        stale = current.get("navStaleDays")
+        suffix = f"（距今 {stale} 天）" if stale is not None else ""
+        facts.append(f"当前参考净值 {_num(current['nav'])}，净值日期 "
+                     f"{current.get('navDate') or '未知'}{suffix}")
+
+    before = ((detail or {}).get("premium") or {}).get("premiumRate")
+    before_basis = str(((detail or {}).get("premium") or {}).get("premiumBasis") or "")
+    if before is None:
+        text += "事件快照没有保存触发时的溢价率，无法判断相对触发时的变化。"
+        missing.append("触发时的溢价率缺失，未做前后对比。")
+        return text, facts, missing
+
+    if before_basis and basis and before_basis != basis:
+        text += (f"触发时用的是{_BASIS_LABEL.get(before_basis, '未知基准')}、当前是{basis_label}，"
+                 "两者滞后性不同，只列数值不做差额对比。")
+        missing.append("触发与当前的溢价基准不同，差额对比不可靠，未给出变化幅度。")
+        return text, facts, missing
+
+    delta = float(rate) - float(before)
+    if abs(delta) < 0.01:
+        text += "与触发时基本持平。"
+    elif delta < 0:
+        text += f"比触发时的 {_pct(before)} 回落 {abs(delta):.2f} 个百分点。"
+    else:
+        text += f"比触发时的 {_pct(before)} 又上升 {delta:.2f} 个百分点。"
+    return text, facts, missing
 
 
 def _indicator_compare(rule_type: str, detail: dict[str, Any],

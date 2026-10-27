@@ -822,7 +822,29 @@ AI 服务与模型配置状态，供「AI 配置」页显示：`{available, agen
 ```
 
 `event` 由 Java 从 `alert_event` 原样读出（`observedDetail` 为 null 时就是 null，**不补算**）；
-`current` 中 `indicators` 仅在指标类规则时出现。Python 不做任何指标计算，只把这两块事实讲清楚，
+`current` 中 `indicators` 仅在指标类规则时出现，`premium` 仅在溢价类规则
+（`PREMIUM_ABOVE` / `PREMIUM_BELOW`）时出现（2026-10-27 补）：
+
+```json
+"premium": {
+  "premiumRate": 1.18, "premiumBasis": "IOPV", "premiumAsOf": "2026-10-27T06:30:00Z",
+  "price": 0.905, "iopv": 0.894, "nav": null, "navDate": null, "navStaleDays": null
+}
+```
+
+溢价事件里"现在溢价多少"就是答案的一半：触发时 3.1%、现在回到 1.2%，说明机会已经消失。
+所以 Python 侧会做前后对比（`回落 N 个百分点` / `又上升 N 个百分点` / `基本持平`）；
+**基准不同时拒绝做减法**——触发时用单位净值、当前用实时 IOPV，滞后性完全不同，
+硬减会给出"回落 0.3 个百分点"这种看着精确、实际无意义的结论，此时只列数值并写进 `limits`。
+标的不是基金或基金参考数据缺失时 `premium` 为 `null`（不是 0），解释里如实说"无法判断溢价是否回落"。
+
+⚠️ **加字段时必须同步改 `backend-python/app/schemas.py` 的 `AgentAlertCurrentState`**。
+Pydantic 默认丢弃未声明的字段，且**不报错**——这条通路第一次接的时候就断在这里：
+Java 明明查了、也发了，Python 侧读到的仍是 `None`，解释里一直写着"当前没有可用的溢价数据"，
+而两侧的单测都是绿的（Python 单测直接喂 dict，绕过了 schema）。
+现在 `tests/test_alert_explain.py::test_request_schema_keeps_premium_snapshot` 专门守这一层。
+
+Python 不做任何指标计算，只把这两块事实讲清楚，
 因此不存在"用今天的 K 线重算当年指标"的问题。
 
 响应结构见 §5 `POST /alert-events/{id}/explain`，两者字段完全一致（Java 原样代理）。

@@ -13,6 +13,7 @@ import com.stockcat.indicator.IndicatorCalculator.IndicatorValues;
 import com.stockcat.mapper.AlertEventMapper;
 import com.stockcat.mapper.InstrumentMapper;
 import com.stockcat.mapper.KlineDailyMapper;
+import com.stockcat.web.dto.FundPremiumResponse;
 import com.stockcat.web.dto.QuoteResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,7 @@ class AlertExplainServiceTest {
     private KlineDailyMapper klineMapper;
     private IndicatorCalculator calculator;
     private RuleEvaluatorRegistry registry;
+    private FundReferenceService fundReferenceService;
     private AssistantClient assistantClient;
     private AlertExplainService service;
 
@@ -62,9 +64,11 @@ class AlertExplainServiceTest {
         klineMapper = mock(KlineDailyMapper.class);
         calculator = mock(IndicatorCalculator.class);
         registry = mock(RuleEvaluatorRegistry.class);
+        fundReferenceService = mock(FundReferenceService.class);
         assistantClient = mock(AssistantClient.class);
         service = new AlertExplainService(eventMapper, instrumentMapper, quoteService, klineMapper,
-                calculator, registry, assistantClient, new ObjectMapper(), "qfq", 250);
+                calculator, registry, fundReferenceService, assistantClient,
+                new ObjectMapper(), "qfq", 250);
 
         Instrument instrument = new Instrument();
         instrument.setId(2L);
@@ -192,6 +196,62 @@ class AlertExplainServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void premium_event_carries_current_premium() {
+        when(eventMapper.findById(5L)).thenReturn(premiumEvent());
+        RuleEvaluator evP = evaluator(false, true);
+        when(registry.get("PREMIUM_ABOVE")).thenReturn(evP);
+        when(quoteService.latest(List.of(2L))).thenReturn(Map.of(2L, quote()));
+        when(fundReferenceService.latestPremiums(anyList()))
+                .thenReturn(Map.of(2L, premium(2.63, "IOPV")));
+
+        service.explain(5L);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(assistantClient).explainAlert(captor.capture());
+        Map<String, Object> current = (Map<String, Object>) captor.getValue().get("current");
+        Map<String, Object> premium = (Map<String, Object>) current.get("premium");
+
+        // 溢价类事件不谈"现在溢价多少"等于没解释：触发时 3%、现在回到 1% 是另一件事
+        assertThat(premium).isNotNull();
+        assertThat(premium.get("premiumRate")).isEqualTo(2.63);
+        assertThat(premium.get("premiumBasis")).isEqualTo("IOPV");
+        assertThat(premium.get("premiumAsOf")).isEqualTo("2026-10-26T07:00:00Z");
+        assertThat(premium.get("nav")).isNull();          // 用 IOPV 做基准时没有净值
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void premium_rule_without_fund_row_sends_null_not_zero() {
+        when(eventMapper.findById(5L)).thenReturn(premiumEvent());
+        RuleEvaluator evP = evaluator(false, true);
+        when(registry.get("PREMIUM_ABOVE")).thenReturn(evP);
+        when(quoteService.latest(List.of(2L))).thenReturn(Map.of(2L, quote()));
+        when(fundReferenceService.latestPremiums(anyList())).thenReturn(Map.of());
+
+        service.explain(5L);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(assistantClient).explainAlert(captor.capture());
+        Map<String, Object> current = (Map<String, Object>) captor.getValue().get("current");
+        // null 表示"没有溢价数据"，Python 侧据此如实说明；给 0 会被读成"溢价归零"
+        assertThat(current).containsEntry("premium", null);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void non_premium_rule_never_queries_fund_reference() {
+        when(eventMapper.findById(1L)).thenReturn(priceEvent());
+        RuleEvaluator evQ = evaluator(false, false);
+        when(registry.get("PRICE_ABOVE")).thenReturn(evQ);
+        when(quoteService.latest(List.of(2L))).thenReturn(Map.of(2L, quote()));
+
+        service.explain(1L);
+
+        verify(fundReferenceService, never()).latestPremiums(anyList());
+    }
+
+    @Test
     void unknown_rule_type_is_treated_as_intraday() {
         when(eventMapper.findById(4L)).thenReturn(priceEvent());
         when(registry.get("PRICE_ABOVE")).thenThrow(ApiException.validationError("未知类型"));
@@ -235,9 +295,31 @@ class AlertExplainServiceTest {
                 MARKET_TIME, MARKET_TIME.plusSeconds(20), "VALID", "TENCENT");
     }
 
+    private static AlertEvent premiumEvent() {
+        AlertEvent e = priceEvent();
+        e.setId(5L);
+        e.setRuleNameSnapshot("500ETF 溢价≥2%");
+        e.setRuleTypeSnapshot("PREMIUM_ABOVE");
+        e.setConditionParamsSnapshot("{\"threshold\":2}");
+        e.setObservedDetail("{\"premium\":{\"premiumRate\":3.1,\"premiumBasis\":\"IOPV\","
+                + "\"premiumAsOf\":\"2026-10-26T06:55:00Z\",\"price\":1.234,\"iopv\":1.197}}");
+        return e;
+    }
+
+    private static FundPremiumResponse premium(double rate, String basis) {
+        return new FundPremiumResponse(LocalDate.of(2026, 10, 26), 1.23, 1.198,
+                MARKET_TIME, null, null, null, rate, basis,
+                "2026-10-26T07:00:00Z", "tencent-qt", null, MARKET_TIME);
+    }
+
     private static RuleEvaluator evaluator(boolean requiresHistory) {
+        return evaluator(requiresHistory, false);
+    }
+
+    private static RuleEvaluator evaluator(boolean requiresHistory, boolean requiresPremium) {
         RuleEvaluator e = mock(RuleEvaluator.class);
         when(e.requiresHistory()).thenReturn(requiresHistory);
+        when(e.requiresPremium()).thenReturn(requiresPremium);
         return e;
     }
 
