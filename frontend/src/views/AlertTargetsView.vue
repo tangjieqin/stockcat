@@ -4,7 +4,8 @@
  * 添加时可直接带上告警规则（自动命名）；持仓标志由交易流水实时推导。
  * 对应 docs/UI.md 2.x「告警-监控标的」与 docs/API.md §2。
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   addMonitorTarget,
   deleteMonitorTarget,
@@ -12,17 +13,51 @@ import {
   updateMonitorTargetEnabled,
   type MonitorTarget,
 } from '../api/instrument'
-import { autoRuleName, buildParams, cooldownToSeconds, createAlertRule, RULE_TYPES, type CooldownUnit } from '../api/alert'
+import { autoRuleName, buildParams, cooldownToSeconds, createAlertRule, listAlertRules, RULE_TYPES, type CooldownUnit } from '../api/alert'
 import { ApiError } from '../api/client'
 import { changeColor } from '../api/quote'
+import { basisLabel, getLatestPremiums, premiumText, type FundPremium } from '../api/fund'
 import { listPositions } from '../api/trade'
 
+const router = useRouter()
 const targets = ref<MonitorTarget[]>([])
 const holdingIds = ref<Set<number>>(new Set())
+const rules = ref<Array<{ instrumentId: number; name: string; enabled: boolean }>>([])
+const premiums = ref<Record<string, FundPremium>>({})
 const loading = ref(false)
 const errorMsg = ref('')
 
 const holding = (t: MonitorTarget) => holdingIds.value.has(t.instrument.id)
+
+function premiumOf(instrumentId: number): FundPremium | null {
+  return premiums.value[String(instrumentId)] ?? null
+}
+
+function premiumHint(instrumentId: number): string {
+  const p = premiumOf(instrumentId)
+  if (!p) return '尚未同步基金参考数据（进入详情页点「刷新参考数据」）'
+  const nav = p.nav == null ? '—' : `${p.nav}${p.navDate ? `（${p.navDate}）` : ''}`
+  return [
+    `价格 ${p.price ?? '—'}`,
+    `IOPV ${p.iopv ?? '—'}`,
+    `净值 ${nav}`,
+    `基准 ${p.premiumBasis ?? '—'}${p.premiumAsOf ? ` @ ${p.premiumAsOf}` : ''}`,
+  ].join(' · ')
+}
+
+/** 每个标的挂的规则（名称聚合，供「规则」列展示） */
+const rulesByInstrument = computed(() => {
+  const map = new Map<number, string[]>()
+  for (const r of rules.value) {
+    if (!map.has(r.instrumentId)) map.set(r.instrumentId, [])
+    map.get(r.instrumentId)!.push(r.name)
+  }
+  return map
+})
+
+function rulesOf(t: MonitorTarget): string[] {
+  return rulesByInstrument.value.get(t.instrument.id) ?? []
+}
 
 // 添加弹窗状态
 const showAdd = ref(false)
@@ -44,9 +79,20 @@ async function load() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const [targetList, positions] = await Promise.all([listMonitorTargets(), listPositions()])
+    const [targetList, positions, rulePage] = await Promise.all([
+      listMonitorTargets(),
+      listPositions(),
+      listAlertRules({ size: 100 }).catch(() => ({ items: [] as Array<{ instrumentId: number; name: string; enabled: boolean }> })),
+    ])
     targets.value = targetList
     holdingIds.value = new Set(positions.filter((p) => p.quantity > 0).map((p) => p.instrumentId))
+    // 规则加载失败不挡监控列表，只是「规则」列显示 -
+    rules.value = rulePage.items
+    // 溢价只对 ETF/LOF 取；失败不影响行情显示（附加列，不能把整页拖成错误页）
+    const fundIds = targetList.filter((t) => t.instrument.type !== 'STOCK').map((t) => t.instrument.id)
+    premiums.value = fundIds.length
+      ? await getLatestPremiums(fundIds).catch(() => ({}))
+      : {}
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -136,28 +182,53 @@ onMounted(load)
       <table class="table">
       <thead>
         <tr>
-          <th>代码</th>
-          <th>名称</th>
-          <th>市场</th>
-          <th>类型</th>
+          <th>标的</th>
           <th>最新价</th>
+          <th>溢价</th>
           <th>持仓</th>
+          <th>规则</th>
           <th>状态</th>
           <th style="width: 140px">操作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="t in targets" :key="t.id">
-          <td class="mono">{{ t.instrument.symbol }}</td>
-          <td>{{ t.instrument.name }}</td>
-          <td>{{ t.instrument.market }}</td>
-          <td>{{ t.instrument.type }}</td>
-          <td class="mono" :style="{ color: changeColor(t.quote?.changePercent) }">
+          <td>
+            <div class="inst-name">{{ t.instrument.name }}</div>
+            <div class="inst-code mono">{{ t.instrument.symbol }}</div>
+          </td>
+          <td class="price mono" :style="{ color: changeColor(t.quote?.changePercent) }">
             {{ t.quote?.lastPrice ?? '—' }}
+          </td>
+          <td class="premium-cell">
+            <template v-if="t.instrument.type !== 'STOCK'">
+              <span
+                class="mono"
+                :title="premiumHint(t.instrument.id)"
+                :style="{ color: changeColor(premiumOf(t.instrument.id)?.premiumRate ?? null) }"
+              >
+                {{ premiumText(premiumOf(t.instrument.id)?.premiumRate ?? null) }}
+              </span>
+              <span v-if="premiumOf(t.instrument.id)" class="basis" :title="premiumHint(t.instrument.id)">
+                {{ basisLabel(premiumOf(t.instrument.id)!) }}
+              </span>
+            </template>
+            <span v-else class="muted">-</span>
           </td>
           <td>
             <span v-if="holding(t)" class="badge hold">持仓中</span>
             <span v-else class="muted">—</span>
+          </td>
+          <td>
+            <span
+              v-if="rulesOf(t).length"
+              class="rule-link"
+              :title="rulesOf(t).join('；')"
+              @click="router.push('/alerts/rules')"
+            >
+              {{ rulesOf(t).length }} 条
+            </span>
+            <span v-else class="muted">-</span>
           </td>
           <td>
             <span class="badge" :class="t.enabled ? 'ok' : 'off'">{{ t.enabled ? '监控中' : '已停用' }}</span>
@@ -278,8 +349,36 @@ onMounted(load)
 .mono {
   font-family: Consolas, monospace;
 }
-.table td:nth-child(5) {
+/* 标的列：名称在前，代码小字在后 */
+.inst-name {
+  font-size: 13px;
+}
+.inst-code {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+.price {
   font-variant-numeric: tabular-nums;
+}
+.rule-link {
+  color: var(--accent);
+  cursor: pointer;
+}
+.rule-link:hover {
+  text-decoration: underline;
+}
+/* 溢价列（仅 ETF/LOF 有值） */
+.premium-cell {
+  white-space: nowrap;
+}
+.basis {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 3px;
+  margin-left: 4px;
 }
 .badge {
   font-size: 12px;

@@ -20,7 +20,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   {
     label: '告警',
     items: [
-      { label: '告警总览', to: '/alerts' },
+      // 告警总览页已并入首页「最近告警」卡片，不再单独占一个导航位
       { label: '监控', to: '/alerts/targets' },
       { label: '规则', to: '/alerts/rules' },
       { label: '历史', to: '/alerts/history' },

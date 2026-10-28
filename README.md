@@ -7,7 +7,8 @@ P3（资料检索）的验收数据见 `docs/PLAN_P3_EVAL.md` §8：`recall@5 = 
 
 - `docs/`：设计文档（PRD / UI / ARCHITECTURE / DATABASE / API / DEVELOPMENT_PLAN + prototype.html 原型）
   - `PLAN_P1.md` / `PLAN_P2.md` / `PLAN_P3.md`：分期实施计划与落地记录
-  - `BACKLOG.md`：待做与明确不做的登记表（推迟的工程项、功能缺口、放弃项）
+  - `BACKLOG.md`：**所有待做事项的唯一登记表**——排队中 / 暂不做 / 明确不做三档，
+    外加一张"自测会看到但不算 bug"的现象表
 - `backend-java/`：Java 后端（Spring Boot 3 + Java 21 + MyBatis + Flyway），业务权威服务
 - `backend-python/`：Python 服务（FastAPI），P1 行情适配 / P2 AI 复盘
 - `frontend/`：前端（Vue 3 + Vite + TS + Pinia）
@@ -94,6 +95,8 @@ STOCKCAT_LLM_API_KEY=sk-...
 ## 行情数据源
 
 - `eastmoney-push2`（东方财富 push2 批量接口）：P0 已验证可用，仅支持沪深 A 股代码（6/5/9 沪、0/1/2/3 深）；北交所暂不支持。
+- 首页指数覆盖中国 / 中国香港 / 美国 / 日本 / 韩国 / 欧洲共 13 个（`stockcat.indices` 配置驱动，海外用东财 `100.*` secid）；
+  调度器只在 A 股交易窗口采集，`POST /api/v1/indices/refresh` 可手动强制刷新。
 - 过期判定：行情时间距今超过 `stockcat.quote.stale-after-minutes`（默认 30 分钟）标记 `STALE`；缺失字段一律 null，不按 0 显示。
 
 ## 历史数据（P1）
@@ -193,3 +196,7 @@ STOCKCAT_LLM_API_KEY=sk-...
   基准不同时拒绝做减法。+ 3 个 Java 单测、4 个 pytest）
 - ✅ 检索排序：同分改按命中词出现次数（不再按发布时间）。**实测 `recall@5` 仍是 0.882**——
   漏召的根因是正确答案得分本身低，不是同分排序；结论记在 `PLAN_P3_EVAL.md §8.10`，这条不再投入
+
+**第一阶段（P0–P3）到此收口**（2026-10-27）。剩下要做的所有事——功能缺口、暂不做、
+明确不做、以及"自测会看到但不算 bug"的现象——统一登记在 **`docs/BACKLOG.md`**，
+按优先级排好了顺序。P4（港股美股 / 云部署 / 多用户）未启动。

@@ -341,7 +341,7 @@ python scripts/p3_eval/audit_labels.py 渠道库存 批价
 
 ## 8.10 排序实验：同分按命中词频次（2026-10-27，无提升）
 
-`BACKLOG.md §1` 那条"同分按命中词频次"的前提是错的。做完之后的记录：
+`BACKLOG.md §4` 那条"同分按命中词频次"的前提是错的。做完之后的记录：
 
 **改动**：`LibraryChunkMapper.search` 多算一个 `occurrences`（命中词在该片段里出现几次，
 用 `sum((length(txt) - length(replace(txt, lower(g), ''))) / length(lower(g)))`），

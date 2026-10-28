@@ -15,8 +15,8 @@ const router = createRouter({
         // AI 助手（P2）：唯一独立开发的 AI 主页面，其他业务页后续用按钮/卡片嵌入
         { path: 'assistant', name: 'assistant', component: () => import('../views/AssistantView.vue'), meta: { title: 'AI 助手' } },
 
-        // 告警
-        { path: 'alerts', name: 'alert-overview', component: () => import('../views/AlertOverviewView.vue'), meta: { title: '告警总览' } },
+        // 告警（告警总览页已并入首页「最近告警」卡片，旧链接重定向回首页）
+        { path: 'alerts', redirect: { path: '/' } },
         { path: 'alerts/targets', name: 'alert-targets', component: () => import('../views/AlertTargetsView.vue'), meta: { title: '监控' } },
         { path: 'alerts/rules', name: 'alert-rules', component: () => import('../views/AlertRulesView.vue'), meta: { title: '告警规则' } },
         { path: 'alerts/history', name: 'alert-history', component: () => import('../views/AlertHistoryView.vue'), meta: { title: '告警历史' } },

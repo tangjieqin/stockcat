@@ -270,6 +270,7 @@ onMounted(() => load(0))
   font-size: 12px;
   border-radius: 4px;
   padding: 2px 8px;
+  white-space: nowrap; /* 「已发送/发送失败」不换行 */
 }
 .badge.ok {
   background: #ecfdf5;

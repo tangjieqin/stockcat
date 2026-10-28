@@ -136,7 +136,12 @@ HTTP 状态码：200 查询/更新成功；201 创建成功；202 仅用于异�
 | PATCH | `/monitor-targets/{id}` | 启用/停用：`{"enabled":false}` |
 | DELETE | `/monitor-targets/{id}` | 移除监控关系，`204` |
 
-首页指数行情（上证指数等）由内置配置驱动，不通过本接口管理。
+首页指数行情由内置配置驱动（`stockcat.indices`，secid:名称 逗号分隔），不通过本接口管理。
+默认覆盖中国 / 中国香港 / 美国 / 日本 / 韩国 / 欧洲共 13 个指数，每条带 `region` 字段供前端分组。
+`GET /indices` 在缓存为空时（如盘外重启服务）现场拉取一次兜底（30 秒冷却）；
+`POST /indices/refresh` 手动强制刷新并返回最新列表——调度器只在 A 股交易窗口采集，海外指数收盘更新后用它拉最新值。
+`GET /indices/custom?secids=1.000688,100.DJIA` 自定义指数实时行情（现场拉取不落库，返回的 `symbol` 即请求的 secid），
+上限 20 个，数据源不可用返回 `503 DATA_SOURCE_UNAVAILABLE`；前端首页「添加指数」用，展示选择存在浏览器本地。
 
 ## 3. 行情
 

@@ -88,6 +88,7 @@ public class AgentToolDtos {
     public record IndexQuote(
             String symbol,
             String name,
+            String region,
             Double lastPrice,
             Double changePercent,
             OffsetDateTime marketTime,

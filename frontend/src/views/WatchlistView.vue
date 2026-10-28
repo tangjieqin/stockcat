@@ -238,8 +238,7 @@ onMounted(load)
       <table class="table">
       <thead>
         <tr>
-          <th>代码</th>
-          <th>名称</th>
+          <th>标的</th>
           <th>最新价</th>
           <th>涨跌幅</th>
           <th>溢价</th>
@@ -251,12 +250,11 @@ onMounted(load)
       </thead>
       <tbody>
         <tr v-for="it in filteredItems" :key="it.id">
-          <td class="mono">
-            <RouterLink class="detail-link" :to="`/stocks/${it.instrument.id}`">{{ it.instrument.symbol }}</RouterLink>
-          </td>
           <td>
-            <RouterLink class="detail-link" :to="`/stocks/${it.instrument.id}`">{{ it.instrument.name }}</RouterLink>
-            <span class="type-tag">{{ it.instrument.type }}</span>
+            <RouterLink class="detail-link" :to="`/stocks/${it.instrument.id}`">
+              <div class="inst-name">{{ it.instrument.name }}<span class="type-tag">{{ it.instrument.type }}</span></div>
+              <div class="inst-code mono">{{ it.instrument.symbol }}</div>
+            </RouterLink>
           </td>
           <td class="mono">{{ it.quote?.lastPrice ?? '—' }}</td>
           <td class="mono" :style="{ color: changeColor(it.quote?.changePercent) }">
@@ -392,6 +390,15 @@ onMounted(load)
 }
 .mono {
   font-family: Consolas, monospace;
+}
+/* 标的列：名称在前，代码小字在后 */
+.inst-name {
+  font-size: 13px;
+}
+.inst-code {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
 }
 .muted {
   color: var(--text-tertiary);

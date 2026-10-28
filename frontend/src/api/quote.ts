@@ -30,10 +30,12 @@ export interface RefreshSummary {
   results: Array<{ instrumentId: number; status: 'SUCCESS' | 'FAILED'; code: string | null }>
 }
 
-/** 内置指数行情（配置驱动，调度器自动采集） */
+/** 内置指数行情（配置驱动，覆盖中国/中国香港/美国/日本/韩国/欧洲，调度器自动采集） */
 export interface IndexQuote {
   symbol: string
   name: string
+  /** 所属地区：中国 / 中国香港 / 美国 / 日本 / 韩国 / 欧洲 / 海外 */
+  region: string | null
   lastPrice: number | null
   changePercent: number | null
   marketTime: string | null
@@ -80,6 +82,21 @@ export async function refreshQuotes(instrumentIds: number[]): Promise<RefreshSum
 
 export async function listIndices(): Promise<IndexQuote[]> {
   const resp = await http.get<IndexQuote[]>('/indices')
+  return resp.data
+}
+
+/** 手动刷新内置指数（调度器只在 A 股交易窗口采集，海外指数收盘更新后用此接口拉最新值） */
+export async function refreshIndices(): Promise<IndexQuote[]> {
+  const resp = await http.post<IndexQuote[]>('/indices/refresh')
+  return resp.data
+}
+
+/** 自定义指数实时行情（现场拉取不落库）：secids 为东财 secid，如 1.000688、100.DJIA */
+export async function fetchCustomIndices(secids: string[]): Promise<IndexQuote[]> {
+  if (!secids.length) return []
+  const resp = await http.get<IndexQuote[]>('/indices/custom', {
+    params: { secids: secids.join(',') },
+  })
   return resp.data
 }
 

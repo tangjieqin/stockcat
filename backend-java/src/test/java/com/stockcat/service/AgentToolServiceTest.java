@@ -166,7 +166,7 @@ class AgentToolServiceTest {
     @Test
     void marketBriefCountsOnlyValidQuotes() {
         when(indexService.listLatest()).thenReturn(List.of(
-                new IndexService.IndexQuote("000001", "上证指数", 3300.5, 0.42, T1, T1, "eastmoney")));
+                new IndexService.IndexQuote("000001", "上证指数", "中国", 3300.5, 0.42, T1, T1, "eastmoney")));
         when(watchlistService.list()).thenReturn(List.of(
                 watchItem(1L, "600519", "贵州茅台", null, quote(1700.0, 2.0, "VALID", T1)),
                 watchItem(2L, "000001", "平安银行", null, quote(11.2, -1.0, "VALID", T1)),

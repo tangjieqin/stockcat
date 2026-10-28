@@ -194,7 +194,7 @@ public class AgentToolService {
             if (idx.collectedAt() != null && (dataAsOf == null || idx.collectedAt().isAfter(dataAsOf))) {
                 dataAsOf = idx.collectedAt();
             }
-            indices.add(new IndexQuote(idx.symbol(), idx.name(), idx.lastPrice(), idx.changePercent(),
+            indices.add(new IndexQuote(idx.symbol(), idx.name(), idx.region(), idx.lastPrice(), idx.changePercent(),
                     idx.marketTime(), idx.collectedAt()));
         }
         if (indices.isEmpty()) {

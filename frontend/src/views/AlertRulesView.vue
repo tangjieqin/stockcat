@@ -384,7 +384,8 @@ onMounted(load)
 .badge {
   font-size: 12px;
   border-radius: 4px;
-  padding: 2px 8px;
+  padding: 3px 10px;
+  white-space: nowrap; /* 「启用/停用」不换行，列宽自动撑开 */
 }
 .badge.ok {
   background: #ecfdf5;
