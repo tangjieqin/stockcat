@@ -58,6 +58,39 @@ export async function deleteTrade(id: number): Promise<void> {
   await http.delete(`/trades/${id}`)
 }
 
+/** 交割单导入单行请求（标的按 market+symbol 查找/自动创建） */
+export interface ImportTradeRow {
+  market: string
+  symbol: string
+  type: string
+  name?: string
+  direction: 'BUY' | 'SELL'
+  price: number
+  quantity: number
+  fee?: number
+  tradeTime: string
+  note?: string
+}
+
+export interface ImportTradesResult {
+  requested: number
+  succeeded: number
+  failed: number
+  results: Array<{
+    index: number
+    status: 'SUCCESS' | 'FAILED'
+    code: string | null
+    message: string | null
+    tradeId: number | null
+  }>
+}
+
+/** 交割单批量导入：逐行返回成败，失败不影响其他行 */
+export async function importTrades(rows: ImportTradeRow[]): Promise<ImportTradesResult> {
+  const resp = await http.post<ImportTradesResult>('/trades/import', rows)
+  return resp.data
+}
+
 export async function listPositions(): Promise<Position[]> {
   const resp = await http.get<Position[]>('/positions')
   return resp.data

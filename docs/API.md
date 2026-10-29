@@ -460,6 +460,17 @@ AI 解释一条已触发的事件（P2 场景二）。**只读**：不写库、�
 ```
 响应 `201 Created`。校验：价格 > 0、数量 > 0、`SELL` 数量不得超过当时持有量（违反返回 `409 CONFLICT`，message 说明当前可卖数量）。
 
+### `POST /trades/import`（批量导入，交割单用）
+请求体为数组，每条**不需要 `instrumentId`**，用证券代码自动找/建标的：
+```json
+[
+  {"symbol": "510300", "name": "沪深300ETF", "type": "ETF", "direction": "BUY", "price": 3.915, "quantity": 10000, "fee": 5.00, "tradeTime": "2026-10-20T09:35:00+08:00", "note": "华泰 交割单导入"}
+]
+```
+- 逐条独立处理，返回 `{"imported": n, "failed": [{index, message}]}`；失败条目不影响其他条目
+- 代码不存在时自动创建标的（`InstrumentService.getOrCreateVerified`）；数量为 0 且无持仓记录的旧卖出（分批建仓前）自动降为 `type=OPEN` 期初建仓
+- 超卖校验同单笔：违反返回 `409`（整批拒绝）
+
 ### `DELETE /trades/{id}`
 `204`。删除后重新计算受影响标的的持仓；若删除导致某笔历史卖出在重放时出现超卖，返回 `409` 并拒绝。
 

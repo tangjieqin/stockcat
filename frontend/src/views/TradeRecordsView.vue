@@ -7,11 +7,14 @@ import { onMounted, ref } from 'vue'
 import {
   createTrade,
   deleteTrade,
+  importTrades,
   listAllInstruments,
   listTrades,
+  type ImportTradesResult,
   type InstrumentOption,
   type Trade,
 } from '../api/trade'
+import { parseDealText, type ParsedTrade } from '../utils/dealImport'
 import { ApiError } from '../api/client'
 
 const trades = ref<Trade[]>([])
@@ -90,6 +93,72 @@ async function remove(t: Trade) {
   }
 }
 
+// ---- 交割单导入：粘贴文本 → 解析预览（可改） → 批量导入 ----
+const showImport = ref(false)
+const importText = ref('')
+const accountTag = ref('华西')
+const parsedRows = ref<ParsedTrade[]>([])
+const skippedLines = ref<string[]>([])
+const parseDone = ref(false)
+const importing = ref(false)
+const importError = ref('')
+const importSummary = ref<ImportTradesResult | null>(null)
+
+function openImport() {
+  importText.value = ''
+  parsedRows.value = []
+  skippedLines.value = []
+  parseDone.value = false
+  importError.value = ''
+  importSummary.value = null
+  showImport.value = true
+}
+
+function doParse() {
+  const { rows, skipped } = parseDealText(importText.value, accountTag.value.trim() || '券商')
+  parsedRows.value = rows
+  skippedLines.value = skipped
+  parseDone.value = true
+}
+
+async function submitImport() {
+  const valid = parsedRows.value.filter((r) => !r.error)
+  if (!valid.length) {
+    importError.value = '没有可导入的行（解析失败的行请修正或删除）'
+    return
+  }
+  importing.value = true
+  importError.value = ''
+  importSummary.value = null
+  try {
+    importSummary.value = await importTrades(
+      valid.map((r) => ({
+        market: 'CN_A',
+        symbol: r.symbol.trim(),
+        type: r.type,
+        name: r.name?.trim() || undefined,
+        direction: r.direction,
+        price: Number(r.price),
+        quantity: Number(r.quantity),
+        fee: Number(r.fee) || undefined,
+        tradeTime: new Date(r.tradeTime).toISOString(),
+        note: r.note || undefined,
+      })),
+    )
+    await load()
+    // 全部成功时收起预览，只留结果横幅
+    if (importSummary.value.failed === 0) {
+      parsedRows.value = []
+      parseDone.value = false
+      importText.value = ''
+    }
+  } catch (e) {
+    importError.value = e instanceof ApiError ? e.message : '导入失败，请重试'
+  } finally {
+    importing.value = false
+  }
+}
+
 function fmtTime(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '—'
 }
@@ -104,7 +173,10 @@ onMounted(load)
         <h1>交易流水</h1>
         <p class="sub">手工记录每笔买卖；持仓由流水确定性重放计算，超卖会被拒绝。</p>
       </div>
-      <button class="btn primary" @click="showAdd = true">＋ 记一笔</button>
+      <div class="actions">
+        <button class="btn" @click="openImport">导入交割单</button>
+        <button class="btn primary" @click="showAdd = true">＋ 记一笔</button>
+      </div>
     </div>
 
     <div v-if="successMsg" class="banner ok">{{ successMsg }}</div>
@@ -195,6 +267,95 @@ onMounted(load)
           <button class="btn" @click="showAdd = false">取消</button>
           <button class="btn primary" :disabled="submitting" @click="submitAdd">
             {{ submitting ? '提交中…' : '记录' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导入交割单弹窗：粘贴 → 解析预览（可改） → 批量导入 -->
+    <div v-if="showImport" class="modal-mask" @click.self="showImport = false">
+      <div class="modal modal-wide">
+        <h2>导入交割单</h2>
+        <p class="hint">
+          支持华泰 / 华西 / 同花顺导出的交割单文本（CSV 全选复制或直接粘贴均可）。先解析预览确认，不会直接入库；
+          账户标签会写进每条流水的备注（持仓不受影响，方便区分两个账户）。
+        </p>
+        <div class="import-tag-row">
+          <label>账户标签</label>
+          <input v-model="accountTag" placeholder="如 华西 / 华泰" />
+          <button class="btn primary" :disabled="!importText.trim()" @click="doParse">解析</button>
+          <span v-if="parseDone" class="muted">识别 {{ parsedRows.length }} 行 · 跳过 {{ skippedLines.length }} 行</span>
+        </div>
+        <textarea
+          v-model="importText"
+          rows="7"
+          placeholder="粘贴交割单文本到这里…&#10;每行应包含：日期、6 位代码、名称、买入/卖出、数量、价格（有表头或 CSV 列名可自动识别列）"
+        ></textarea>
+        <div v-if="parseDone && skippedLines.length" class="hint">
+          已跳过 {{ skippedLines.length }} 行（无 6 位代码：转账、利息、说明行等）——{{ skippedLines[0]?.slice(0, 40) }}…
+        </div>
+
+        <div v-if="parseDone && parsedRows.length" class="preview-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>成交时间</th>
+                <th>代码 / 名称</th>
+                <th>方向</th>
+                <th>价格</th>
+                <th>数量</th>
+                <th>费用</th>
+                <th>解析</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(r, i) in parsedRows" :key="i" :class="{ 'row-error': r.error }">
+                <td>
+                  <input
+                    :value="toLocalInput(new Date(r.tradeTime))"
+                    type="datetime-local"
+                    class="cell-input"
+                    @change="r.tradeTime = new Date(($event.target as HTMLInputElement).value).toISOString()"
+                  />
+                </td>
+                <td class="inst-cell">
+                  <input v-model="r.symbol" class="cell-input mono" placeholder="代码" />
+                  <input v-model="r.name" class="cell-input" placeholder="名称" />
+                </td>
+                <td>
+                  <select v-model="r.direction" class="cell-input">
+                    <option value="BUY">买入</option>
+                    <option value="SELL">卖出</option>
+                  </select>
+                </td>
+                <td><input v-model.number="r.price" type="number" step="0.0001" class="cell-input num" /></td>
+                <td><input v-model.number="r.quantity" type="number" min="1" class="cell-input num" /></td>
+                <td><input v-model.number="r.fee" type="number" step="0.01" min="0" class="cell-input num" /></td>
+                <td class="parse-status">{{ r.error ?? '✓' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else-if="parseDone" class="empty">
+          没有解析出交易行——检查内容是否完整，或改用 CSV 列头一起复制
+        </div>
+
+        <div v-if="importError" class="banner error">{{ importError }}</div>
+        <div v-if="importSummary" class="banner ok">
+          导入完成：{{ importSummary.succeeded }} 成功 / {{ importSummary.failed }} 失败
+          <div v-for="f in importSummary.results.filter((x) => x.status === 'FAILED')" :key="f.index" class="fail-line">
+            第 {{ f.index + 1 }} 行：{{ f.message }}
+          </div>
+        </div>
+
+        <div class="modal-foot">
+          <button class="btn" @click="showImport = false">关闭</button>
+          <button
+            class="btn primary"
+            :disabled="importing || !parsedRows.some((r) => !r.error)"
+            @click="submitImport"
+          >
+            {{ importing ? '导入中…' : `导入 ${parsedRows.filter((r) => !r.error).length} 行` }}
           </button>
         </div>
       </div>
@@ -369,5 +530,83 @@ onMounted(load)
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+/* 导入交割单弹窗 */
+.actions {
+  display: flex;
+  gap: 8px;
+}
+.modal-wide {
+  width: 880px;
+  max-width: 94vw;
+}
+.import-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+.import-tag-row label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.import-tag-row input {
+  width: 160px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  font-family: Consolas, monospace;
+  resize: vertical;
+}
+.preview-wrap {
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 10px;
+}
+.cell-input {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  width: 100px;
+  box-sizing: border-box;
+}
+.cell-input.num {
+  width: 84px;
+  text-align: right;
+}
+.cell-input.mono {
+  font-family: Consolas, monospace;
+  width: 72px;
+}
+.inst-cell {
+  white-space: nowrap;
+}
+.inst-cell .cell-input:not(.mono) {
+  width: 110px;
+  margin-left: 4px;
+}
+.row-error {
+  background: #fef2f2;
+}
+.parse-status {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.fail-line {
+  font-size: 12px;
+  margin-top: 2px;
 }
 </style>

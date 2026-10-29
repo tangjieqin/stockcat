@@ -2,6 +2,8 @@ package com.stockcat.web;
 
 import com.stockcat.service.TradeService;
 import com.stockcat.web.dto.CreateTradeRequest;
+import com.stockcat.web.dto.ImportTradeRequest;
+import com.stockcat.web.dto.ImportTradesResponse;
 import com.stockcat.web.dto.PageResponse;
 import com.stockcat.web.dto.TradeResponse;
 import jakarta.validation.Valid;
@@ -10,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
+import java.util.List;
 
 /**
  * 交易流水，对应 docs/API.md §6。
@@ -39,6 +42,14 @@ public class TradeController {
     public ResponseEntity<TradeResponse> create(@Valid @RequestBody CreateTradeRequest req) {
         TradeResponse created = service.create(req);
         return ResponseEntity.created(URI.create("/api/v1/trades/" + created.id())).body(created);
+    }
+
+    /**
+     * 交割单批量导入：标的自动查找/创建，逐行返回成败，失败不影响其他行（docs/API.md §6）。
+     */
+    @PostMapping("/trades/import")
+    public ImportTradesResponse importTrades(@RequestBody List<ImportTradeRequest> rows) {
+        return service.importTrades(rows);
     }
 
     @DeleteMapping("/trades/{id}")
